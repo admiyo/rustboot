@@ -18,9 +18,33 @@ struct BootPacket{
     your_ip: Ipv4Addr,
     server_ip: Ipv4Addr,
     gateway_ip: Ipv4Addr,
-    client_mac: MacAddress ,
+    client_mac: MacAddress ,   
 }
 
+fn build_boot_packet(buf: &[u8]) -> BootPacket{
+    let boot_packet = BootPacket{
+        opcode: buf[0],
+        hwtype: buf[1],
+        hw_addr_len: buf[2],
+        hop_count: buf[3],
+        txn_id: u32::from_be_bytes(
+            buf[4  .. 8].try_into().
+                expect("txn_id slice with incorrect length")),
+        num_secs:   u16::from_be_bytes(
+            [buf[8], buf[9]]),
+        _unused: u16::from_be_bytes(
+            [buf[10], buf[11]]),
+        client_ip:  Ipv4Addr::new(buf[12], buf[13], buf[14], buf[15]),
+        your_ip:    Ipv4Addr::new(buf[16], buf[17], buf[18], buf[19]),
+        server_ip:  Ipv4Addr::new(buf[20], buf[21], buf[22], buf[23]),
+        gateway_ip: Ipv4Addr::new(buf[24], buf[25], buf[26], buf[27]),
+        client_mac: MacAddress::new(
+            buf[28  .. 34].try_into().
+                expect("MacAddress slice with incorrect length"))
+    };
+    boot_packet
+            
+}
 
 fn main() -> std::io::Result<()> {
     {
@@ -33,39 +57,22 @@ fn main() -> std::io::Result<()> {
         // the message, it will be cut off.
         let mut buf = [0; 300];
         let (_amt, _src) = socket.recv_from(&mut buf)?;
+
+
+        let boot_packet = build_boot_packet(&buf);
+        
         println!("packet received");
+        println!("opcode      = {0}", boot_packet.opcode);
+        println!("hwtype      = {0}", boot_packet.hwtype);
+        println!("hw addr len = {0}", boot_packet.hw_addr_len);
+        println!("hop count   = {0}", boot_packet.hop_count);            
+        println!("txn_id      = {:x}", boot_packet.txn_id);            
+        println!("num_secs    = {:}", boot_packet.num_secs);
+        println!("ips {0} {1} {2} {3}",
+                 boot_packet.client_ip, boot_packet.your_ip,
+                 boot_packet.server_ip,  boot_packet.gateway_ip);
+        println!("Mac Addr:   = {:}", boot_packet.client_mac);            
 
-        {
-            let boot_packet = BootPacket{
-                opcode: buf[0],
-                hwtype: buf[1],
-                hw_addr_len: buf[2],
-                hop_count: buf[3],
-                txn_id: u32::from_be_bytes(buf[4  .. 8].try_into().
-                        expect("txn_id slice with incorrect length")),
-                num_secs:   u16::from_be_bytes(
-                    [buf[8], buf[9]]),
-                _unused: u16::from_be_bytes(
-                    [buf[10], buf[11]]),
-                client_ip:  Ipv4Addr::new(buf[12], buf[13], buf[14], buf[15]),
-                your_ip:    Ipv4Addr::new(buf[16], buf[17], buf[18], buf[19]),
-                server_ip:  Ipv4Addr::new(buf[20], buf[21], buf[22], buf[23]),
-                gateway_ip: Ipv4Addr::new(buf[24], buf[25], buf[26], buf[27]),
-                client_mac: MacAddress::new(buf[28  .. 34].try_into().
-                        expect("MacAddress slice with incorrect length"))
-            };
-            println!("opcode      = {0}", boot_packet.opcode);
-            println!("hwtype      = {0}", boot_packet.hwtype);
-            println!("hw addr len = {0}", boot_packet.hw_addr_len);
-            println!("hop count   = {0}", boot_packet.hop_count);            
-            println!("txn_id      = {:x}", boot_packet.txn_id);            
-            println!("num_secs    = {:}", boot_packet.num_secs);
-            println!("ips {0} {1} {2} {3}",
-                     boot_packet.client_ip, boot_packet.your_ip,
-                     boot_packet.server_ip,  boot_packet.gateway_ip);
-            println!("Mac Addr:   = {:}", boot_packet.client_mac);            
-
-        }
     }
         
     Ok(())
