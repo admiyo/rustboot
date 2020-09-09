@@ -18,7 +18,7 @@ struct BootPacket{
     your_ip: Ipv4Addr,
     server_ip: Ipv4Addr,
     gateway_ip: Ipv4Addr,
-    client_mac: MacAddress ,   
+    client_mac: MacAddress ,
 }
 
 fn build_boot_packet(buf: &[u8]) -> BootPacket{
@@ -43,12 +43,26 @@ fn build_boot_packet(buf: &[u8]) -> BootPacket{
                 expect("MacAddress slice with incorrect length"))
     };
     boot_packet
-            
+
 }
 
+impl BootPacket {
+    fn log_packet(&self){
+        println!("packet received");
+        println!("opcode      = {0}", self.opcode);
+        println!("hwtype      = {0}", self.hwtype);
+        println!("hw addr len = {0}", self.hw_addr_len);
+        println!("hop count   = {0}", self.hop_count);
+        println!("txn_id      = {:x}", self.txn_id);
+        println!("num_secs    = {:}", self.num_secs);
+        println!("ips {0} {1} {2} {3}",
+                 self.client_ip, self.your_ip,
+                 self.server_ip,  self.gateway_ip);
+        println!("Mac Addr:   = {:}", self.client_mac);
+    }
+}
 fn main() -> std::io::Result<()> {
     {
-
         let local_ip4 = IpAddr::from_str("0.0.0.0").unwrap();
         let listen4_port: u16  = 67;
         let socket = UdpSocket::bind(&SocketAddr::new(local_ip4, listen4_port))?;
@@ -56,24 +70,12 @@ fn main() -> std::io::Result<()> {
         // Receives a single datagram message on the socket. If `buf` is too small to hold
         // the message, it will be cut off.
         let mut buf = [0; 300];
+
         let (_amt, _src) = socket.recv_from(&mut buf)?;
-
-
         let boot_packet = build_boot_packet(&buf);
-        
-        println!("packet received");
-        println!("opcode      = {0}", boot_packet.opcode);
-        println!("hwtype      = {0}", boot_packet.hwtype);
-        println!("hw addr len = {0}", boot_packet.hw_addr_len);
-        println!("hop count   = {0}", boot_packet.hop_count);            
-        println!("txn_id      = {:x}", boot_packet.txn_id);            
-        println!("num_secs    = {:}", boot_packet.num_secs);
-        println!("ips {0} {1} {2} {3}",
-                 boot_packet.client_ip, boot_packet.your_ip,
-                 boot_packet.server_ip,  boot_packet.gateway_ip);
-        println!("Mac Addr:   = {:}", boot_packet.client_mac);            
 
+        boot_packet.log_packet();
     }
-        
+
     Ok(())
 }
