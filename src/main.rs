@@ -6,6 +6,8 @@ use std::str::FromStr;
 use std::net::SocketAddr;
 use mac_address::MacAddress;
 use std::net::Ipv4Addr;
+
+
 #[derive(Copy, Clone)]
 #[repr(C)]
 struct BootPacket{
@@ -28,29 +30,16 @@ struct BootPacket{
 }
 
 fn alloc_boot_packet() -> BootPacket{
-    BootPacket{
-        opcode: 0,
-        _hwtype: 0,
-        _hw_addr_len: 0,
-        _hop_count: 0,
-        _txn_id: [0; 4],
-        _num_secs: [0; 2],
-        _unused: [0;2],
-        _client_ip: [0; 4],
-        _your_ip: [0; 4],
-        _server_ip: [0; 4],
-        _gateway_ip: [0; 4],
-        _client_mac: [0; 6],
-        _client_mac_remainder: [0; 10],
-        _server_host_name: [0; 64],
-        _boot_file_name: [0; 128],
-        _vendor_info: [0; 64]
+    let buf: [u8; size_of::<BootPacket>()] = [0; size_of::<BootPacket>()];
+    unsafe {
+         transmute::<[u8; size_of::<BootPacket>()],BootPacket>(buf)
     }
 }
 
 
 impl BootPacket {
     fn log(&self){
+        println!("----------------------------------------------------");
         println!("opcode      = {0}", self.opcode);
         println!("hwtype      = {0}", self._hwtype);
         println!("hw addr len = {0}", self._hw_addr_len);
