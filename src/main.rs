@@ -17,6 +17,7 @@ fn handle_packet(server_port: u16, socket: &UdpSocket) ->
         let mut buf = transmute::<
                 bootpacket::BootPacket,[u8; size_of::<bootpacket::BootPacket>()]>(packet);
         let (_amt, _src) = socket.recv_from(&mut buf)?;
+        
         packet = transmute::<[u8; size_of::<bootpacket::BootPacket>()],bootpacket::BootPacket>(buf);
     }
     println!("packet received");
