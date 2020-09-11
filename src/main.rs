@@ -7,6 +7,7 @@ use std::net::SocketAddr;
 use mac_address::MacAddress;
 use std::net::Ipv4Addr;
 
+mod bootpacket;
 
 #[derive(Copy, Clone)]
 #[repr(C)]
