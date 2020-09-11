@@ -63,68 +63,62 @@ impl BootPacket {
         println!("gateway_ip  = {0} ", Ipv4Addr::from(self._gateway_ip));
         println!("Mac Addr:   = {:}", MacAddress::new(self._client_mac));
     }
-
-
 }
 
 
 fn generate_response(packet: BootPacket) ->  BootPacket
 {
     let mut response_packet = packet;
-    
+
     let server_hostname = "ayoungP40";
     response_packet._server_host_name[0..server_hostname.len()].
         copy_from_slice(server_hostname.as_bytes());
-    
+
     response_packet._server_ip =  Ipv4Addr::new(192,168,144,1).octets();
     response_packet._your_ip =  Ipv4Addr::new(192,168,144,100).octets();
-    response_packet.opcode = 2;   
+    response_packet.opcode = 2;
     response_packet
+}
+fn handle_packet(server_port: u16, socket: &UdpSocket) ->
+    std::io::Result<()>
+{
+    let mut packet = alloc_boot_packet();
+
+    unsafe {
+        let mut buf = transmute::<
+                BootPacket,[u8; size_of::<BootPacket>()]>(packet);
+        let (_amt, _src) = socket.recv_from(&mut buf)?;
+        packet = transmute::<[u8; size_of::<BootPacket>()],BootPacket>(buf);
+    }
+    println!("packet received");
+    packet.log();
+
+    let response_packet = generate_response(packet);
+
+    println!("sending packet");
+    response_packet.log();
+
+    let dest = SocketAddr::from(
+        (response_packet._your_ip, server_port));
+    unsafe {
+        let buf = transmute::<BootPacket,[u8; size_of::<BootPacket>()]>(
+            response_packet);
+        socket.send_to(&buf, &dest)?;
+    };
+    Ok(())
 }
 
 fn main() -> std::io::Result<()> {
     {
         println!("size of Boot Packet layout  = {0}",
                  size_of::<BootPacket>());
-
         let local_ip4 = IpAddr::from_str("0.0.0.0").unwrap();
-        let listen4_port: u16  = 67;
-        let socket = UdpSocket::bind(&SocketAddr::new(local_ip4, listen4_port))?;
+        let server_port: u16  = 67;
+        let socket = UdpSocket::bind(&SocketAddr::new(local_ip4, server_port))?;
         socket.set_broadcast(true).expect("set_broadcast call failed");
-        
         loop {
-
-            fn handle_packet(listen4_port: u16, socket: &UdpSocket) ->
-                std::io::Result<()>
-            {
-                let mut packet = alloc_boot_packet(); 
-
-                unsafe {
-                    let mut buf = transmute::<
-                            BootPacket,[u8; size_of::<BootPacket>()]>(packet);
-                    let (_amt, _src) = socket.recv_from(&mut buf)?;
-                    packet = transmute::<[u8; size_of::<BootPacket>()],
-                                         BootPacket>(buf);
-                }
-                println!("packet received");
-                packet.log();
-                
-                let response_packet = generate_response(packet);
-                
-                println!("sending packet");
-                response_packet.log();
-                
-                let dest = SocketAddr::from(
-                    (response_packet._your_ip, listen4_port));
-                unsafe {
-                    let buf = transmute::<BootPacket,[u8; size_of::<BootPacket>()]>(
-                        response_packet);
-                    socket.send_to(&buf, &dest)?;
-                };
-                Ok(())
-            }
-            handle_packet(listen4_port, &socket)?
-        }        
+            handle_packet(server_port, &socket)?
+        }
     }
     //Ok(())
 }
