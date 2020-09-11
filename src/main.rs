@@ -6,11 +6,10 @@ use std::str::FromStr;
 use std::net::SocketAddr;
 use mac_address::MacAddress;
 use std::net::Ipv4Addr;
-
 #[derive(Copy, Clone)]
 #[repr(C)]
 struct BootPacket{
-    _opcode: u8,
+    opcode: u8,
     _hwtype: u8,
     _hw_addr_len: u8,
     _hop_count: u8,
@@ -30,7 +29,7 @@ struct BootPacket{
 
 fn alloc_boot_packet() -> BootPacket{
     BootPacket{
-        _opcode: 0,
+        opcode: 0,
         _hwtype: 0,
         _hw_addr_len: 0,
         _hop_count: 0,
@@ -52,54 +51,80 @@ fn alloc_boot_packet() -> BootPacket{
 
 impl BootPacket {
     fn log(&self){
-        println!("packet received");
-        println!("opcode      = {0}", self._opcode);
+        println!("opcode      = {0}", self.opcode);
         println!("hwtype      = {0}", self._hwtype);
         println!("hw addr len = {0}", self._hw_addr_len);
         println!("hop count   = {0}", self._hop_count);
         println!("txn_id      = {:x}", u32::from_be_bytes(self._txn_id));
         println!("num_secs    = {:}", u16::from_be_bytes(self._num_secs));
-        println!("ips {0} {1} {2} {3}",
-                 Ipv4Addr::from(self._client_ip),
-                 Ipv4Addr::from(self._your_ip),
-                 Ipv4Addr::from(self._server_ip),
-                 Ipv4Addr::from(self._gateway_ip));
+        println!("client_ip   = {0} ", Ipv4Addr::from(self._client_ip));
+        println!("your_ip     = {0} ", Ipv4Addr::from(self._your_ip));
+        println!("server_ip   = {0} ", Ipv4Addr::from(self._server_ip));
+        println!("gateway_ip  = {0} ", Ipv4Addr::from(self._gateway_ip));
         println!("Mac Addr:   = {:}", MacAddress::new(self._client_mac));
     }
+
+
 }
 
 
+fn generate_response(packet: BootPacket) ->  BootPacket
+{
+    let mut response_packet = packet;
+    
+    let server_hostname = "ayoungP40";
+    response_packet._server_host_name[0..server_hostname.len()].
+        copy_from_slice(server_hostname.as_bytes());
+    
+    response_packet._server_ip =  Ipv4Addr::new(192,168,144,1).octets();
+    response_packet._your_ip =  Ipv4Addr::new(192,168,144,100).octets();
+    response_packet.opcode = 2;   
+    response_packet
+}
 
 fn main() -> std::io::Result<()> {
     {
-
         println!("size of Boot Packet layout  = {0}",
                  size_of::<BootPacket>());
 
-        let mut packet = alloc_boot_packet(); 
         let local_ip4 = IpAddr::from_str("0.0.0.0").unwrap();
         let listen4_port: u16  = 67;
         let socket = UdpSocket::bind(&SocketAddr::new(local_ip4, listen4_port))?;
         socket.set_broadcast(true).expect("set_broadcast call failed");
-        // Receives a single datagram message on the socket. If `buf` is too small to hold
-        // the message, it will be cut off.
-        unsafe {
-            let mut buf = transmute::<BootPacket,
-                                      [u8; size_of::<BootPacket>()]>(packet);
-            let (_amt, _src) = socket.recv_from(&mut buf)?;
-            packet = transmute::<[u8; size_of::<BootPacket>()],
-                                      BootPacket>(buf);
-        }
-        packet.log();
+        
+        loop {
 
-        //let mut response_packet = boot_packet;
-        //response_packet.client_ip =  Ipv4Addr::new(192,168,144,100);
-        //response_packet.opcode = 2;
-        //response_packet.log_packet();
+            fn handle_packet(listen4_port: u16, socket: &UdpSocket) ->
+                std::io::Result<()>
+            {
+                let mut packet = alloc_boot_packet(); 
 
-        //response_packet.to_bytes(&mut buf);
-        //socket.send_to(&buf, &src)?;
+                unsafe {
+                    let mut buf = transmute::<
+                            BootPacket,[u8; size_of::<BootPacket>()]>(packet);
+                    let (_amt, _src) = socket.recv_from(&mut buf)?;
+                    packet = transmute::<[u8; size_of::<BootPacket>()],
+                                         BootPacket>(buf);
+                }
+                println!("packet received");
+                packet.log();
+                
+                let response_packet = generate_response(packet);
+                
+                println!("sending packet");
+                response_packet.log();
+                
+                let dest = SocketAddr::from(
+                    (response_packet._your_ip, listen4_port));
+                unsafe {
+                    let buf = transmute::<BootPacket,[u8; size_of::<BootPacket>()]>(
+                        response_packet);
+                    socket.send_to(&buf, &dest)?;
+                };
+                Ok(())
+            }
+            handle_packet(listen4_port, &socket)?
+        }        
     }
-
-    Ok(())
+    //Ok(())
 }
