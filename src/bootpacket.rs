@@ -6,7 +6,7 @@ use std::net::Ipv4Addr;
 
 #[derive(Copy, Clone)]
 #[repr(C)]
-struct BootPacket{
+pub struct BootPacket{
     opcode: u8,
     _hwtype: u8,
     _hw_addr_len: u8,
@@ -15,7 +15,7 @@ struct BootPacket{
     _num_secs: [u8; 2],
     _unused: [u8;2],
     _client_ip: [u8; 4],
-    _your_ip: [u8; 4],
+    pub your_ip: [u8; 4],
     _server_ip: [u8; 4],
     _gateway_ip: [u8; 4],
     _client_mac: [u8; 6],
@@ -25,7 +25,7 @@ struct BootPacket{
     _vendor_info: [u8; 64]
 }
 
-fn alloc_boot_packet() -> BootPacket{
+pub fn alloc_boot_packet() -> BootPacket{
     let buf: [u8; size_of::<BootPacket>()] = [0; size_of::<BootPacket>()];
     unsafe {
          transmute::<[u8; size_of::<BootPacket>()],BootPacket>(buf)
@@ -34,7 +34,7 @@ fn alloc_boot_packet() -> BootPacket{
 
 
 impl BootPacket {
-    fn log(&self){
+    pub fn log(&self){
         println!("----------------------------------------------------");
         println!("opcode      = {0}", self.opcode);
         println!("hwtype      = {0}", self._hwtype);
@@ -43,10 +43,24 @@ impl BootPacket {
         println!("txn_id      = {:x}", u32::from_be_bytes(self._txn_id));
         println!("num_secs    = {:}", u16::from_be_bytes(self._num_secs));
         println!("client_ip   = {0} ", Ipv4Addr::from(self._client_ip));
-        println!("your_ip     = {0} ", Ipv4Addr::from(self._your_ip));
+        println!("your_ip     = {0} ", Ipv4Addr::from(self.your_ip));
         println!("server_ip   = {0} ", Ipv4Addr::from(self._server_ip));
         println!("gateway_ip  = {0} ", Ipv4Addr::from(self._gateway_ip));
         println!("Mac Addr:   = {:}", MacAddress::new(self._client_mac));
     }
 }
 
+
+pub fn generate_response(packet: BootPacket) ->  BootPacket
+{
+    let mut response_packet = packet;
+
+    let server_hostname = "ayoungP40";
+    response_packet._server_host_name[0..server_hostname.len()].
+        copy_from_slice(server_hostname.as_bytes());
+
+    response_packet._server_ip =  Ipv4Addr::new(192,168,144,1).octets();
+    response_packet.your_ip =  Ipv4Addr::new(192,168,144,100).octets();
+    response_packet.opcode = 2;
+    response_packet
+}
