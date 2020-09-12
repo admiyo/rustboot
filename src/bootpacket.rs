@@ -10,6 +10,22 @@ pub struct VendorData{
     data: Vec<u8>
 }
 
+type ParseError = &'static str;
+
+pub fn new_vendor_data(code: u8, data: &Vec<u8>) ->Result<VendorData, ParseError>{
+    let len = data.len();
+
+    if len > 60 {
+        return Err("vendor data too long")
+    }else{
+        return Ok(VendorData {
+            code: code,
+            len: data.len() as u8,
+            data: data.to_vec()
+        })
+    }
+}
+
 
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -194,7 +210,7 @@ mod tests {
     #[test]
     fn test_parse_vendor_data() {
         let packet = read_packet();
-       let vendor_data:Vec::<VendorData> = parse_vendor_data(&packet);
+        let vendor_data:Vec::<VendorData> = parse_vendor_data(&packet);
 
          // These can all be found at:
         // https://www.iana.org/assignments/bootp-dhcp-parameters/bootp-dhcp-parameters.xhtml
@@ -256,5 +272,17 @@ mod tests {
             assert_eq!(23,  vendor_data[6].len);
             assert_eq!(0,  vendor_data[6].data.len());
         }        
+    }
+
+    #[test]
+    fn test_new_vendor_data_ok() {
+        match new_vendor_data(53, &vec![1]){
+            Ok(vendor_data) => {
+                assert_eq!(53, vendor_data.code);
+                assert_eq!(1,  vendor_data.len);
+                assert_eq!(vec![1],  vendor_data.data);
+            },
+            Err(msg) =>  assert!(false, msg)
+        }   
     }
 }
