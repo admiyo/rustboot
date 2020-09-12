@@ -2,6 +2,14 @@ use std::mem::transmute;
 use std::mem::size_of;
 use mac_address::MacAddress;
 use std::net::Ipv4Addr;
+use std::vec::Vec;
+
+pub struct VendorData{
+    code: u8,
+    len: u8,
+    data: Vec<u8>
+}
+
 
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -21,7 +29,8 @@ pub struct BootPacket{
     _client_mac_remainder: [u8; 10],
     _server_host_name: [u8; 64],
     _boot_file_name: [u8; 128],
-    _vendor_info: [u8; 64]
+    _vendor_magic: [u8; 4],
+    _vendor_info: [u8; 60]
 }
 
 pub fn alloc_boot_packet() -> BootPacket{
@@ -37,6 +46,13 @@ impl BootPacket {
     pub fn client_mac(&self) ->  MacAddress{
         MacAddress::new(self._client_mac)
     }
+
+    pub fn vendor_magic(&self) -> [u8; 4]  {
+        let mut retval: [u8; 4] = [0; 4];
+        retval.copy_from_slice(&self._vendor_magic);
+        retval
+    }
+
     
     pub fn log(&self){
         println!("----------------------------------------------------");
@@ -101,7 +117,8 @@ mod tests {
         let f = File::open(filename).unwrap();
         let take_size = u64::try_from(size_of::<BootPacket>()).unwrap();
         let mut handle = f.take( take_size );
-        let mut buffer: [u8; size_of::<BootPacket>()] = [0; size_of::<BootPacket>()];
+        let mut buffer: [u8; size_of::<BootPacket>()] = [
+            0; size_of::<BootPacket>()];
         handle.read(&mut buffer).unwrap();
 
         let packet = 
@@ -122,12 +139,122 @@ mod tests {
     fn test_parse_packet() {
         let packet = read_packet();
         assert_eq!(1, packet.opcode);
-
         
         assert_eq!(1, packet.opcode);
         let test_mac = MacAddress::new([0x52,0x54,0x00,0xE6,0x08,0x031]);
         assert_eq!(test_mac, packet.client_mac());
-        
+        assert_eq!([99,130,83,99],   packet.vendor_magic());
     }
-}
 
+
+    #[test]
+    fn test_parse_vendor_data() {
+        let packet = read_packet();
+
+
+        let mut vendor_data:Vec::<VendorData> = vec!();
+        let mut vend_itr  = packet._vendor_info.iter();
+
+        let vendor_data = loop {
+            let next_code = vend_itr.next();
+
+            match next_code {
+                Some(code) => {
+                    if (*code == 0) || (*code == 255) {
+                        vendor_data.push(VendorData{
+                            code: *code,
+                            len: 0,
+                            data: vec!()
+                        });
+                    }else{
+                        let len = vend_itr.next().unwrap();
+                        let mut vend_info:Vec::<u8> = vec!();
+                        for  _i in 0..*len{
+                            let val = vend_itr.next();
+                            match val {
+                                Some(b) => vend_info.push(*b),
+                                None => {
+                                    vend_info.clear();
+                                    println!("invalid code = {} len = {} _i={}",
+                                             *code, len, _i);
+                                    break
+                                }
+                            }
+                        };
+                        vendor_data.push(VendorData{
+                            code: *code,
+                            len: *len,
+                            data: vend_info
+                        });
+                    }
+                },
+                None => break vendor_data
+            }
+        };
+
+        // These can all be found at:
+        // https://www.iana.org/assignments/bootp-dhcp-parameters/bootp-dhcp-parameters.xhtml
+        
+        {  // 53 DHCP Message type
+           // https://tools.ietf.org/html/rfc1533#section-9.4
+            assert_eq!(53, vendor_data[0].code);
+            assert_eq!(1,  vendor_data[0].len);
+            assert_eq!(vec![1],  vendor_data[0].data);
+        }
+        {
+            // 57 = Maximum DHCP Message Size
+            // https://tools.ietf.org/html/rfc1533#section-9.8
+            assert_eq!(57, vendor_data[1].code);
+            assert_eq!(2,  vendor_data[1].len);
+            assert_eq!(vec![5,192],  vendor_data[1].data);
+        }
+        {
+            // 93 = Client System Architecture Type Option Definition 
+            // https://tools.ietf.org/html/rfc4578#section-2.1
+            assert_eq!(93, vendor_data[2].code);
+            assert_eq!(2,  vendor_data[2].len);
+            // 0 = Intel
+            assert_eq!(vec![0, 0],  vendor_data[2].data);
+        }
+        {
+            // 94 = Client Network Interface Identifier Option Definition
+            // https://tools.ietf.org/html/rfc4578#section-2.2
+            assert_eq!(94, vendor_data[3].code);
+            assert_eq!(3,  vendor_data[3].len);
+            assert_eq!(vec![1, 2, 1],  vendor_data[3].data);
+        }
+        {
+            //https://tools.ietf.org/html/rfc2132#section-9.13
+            assert_eq!(60, vendor_data[4].code);
+            assert_eq!(32,  vendor_data[4].len);
+            let vendor_class_id = std::str::from_utf8(
+                &vendor_data[4].data).unwrap(); 
+            assert_eq!(vendor_class_id.len(), usize::from(vendor_data[4].len));
+            assert_eq!("PXEClient:Arch:00000:UNDI:002001", vendor_class_id);
+        }        
+        {
+            //77 User class info
+            // https://tools.ietf.org/html/rfc3004#section-4
+            assert_eq!(77, vendor_data[5].code);
+            assert_eq!(4,  vendor_data[5].len);
+
+            let user_class_info = std::str::from_utf8(
+                &vendor_data[5].data).unwrap(); 
+            assert_eq!(user_class_info.len(), usize::from(vendor_data[5].len));
+            assert_eq!("iPXE", user_class_info);
+            assert_eq!(vec![105, 80, 88, 69],  vendor_data[5].data);
+        }        
+        {
+            //The sample packet has a mangled value for Option 55.
+            //55 Parameter Request List
+            // https://tools.ietf.org/html/rfc2132#section-9.8
+            assert_eq!(55, vendor_data[6].code);
+            assert_eq!(23,  vendor_data[6].len);
+            assert_eq!(0,  vendor_data[6].data.len());
+        }        
+
+
+    }
+    
+
+}

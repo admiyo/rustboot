@@ -12,22 +12,19 @@ fn handle_packet(server_port: u16, socket: &UdpSocket) ->
     std::io::Result<()>
 {
     let mut packet = bootpacket::alloc_boot_packet();
-
     unsafe {
         let mut buf = transmute::<
-                bootpacket::BootPacket,[u8; size_of::<bootpacket::BootPacket>()]>(packet);
+                bootpacket::BootPacket,
+            [u8; size_of::<bootpacket::BootPacket>()]>(packet);
         let (_amt, _src) = socket.recv_from(&mut buf)?;
-        
-        packet = transmute::<[u8; size_of::<bootpacket::BootPacket>()],bootpacket::BootPacket>(buf);
+        packet = transmute::<[u8; size_of::<bootpacket::BootPacket>()],
+                             bootpacket::BootPacket>(buf);
     }
     println!("packet received");
     packet.log();
-
     let response_packet = bootpacket::generate_response(packet);
-
     println!("sending packet");
     response_packet.log();
-
     let dest = SocketAddr::from(
         (response_packet.your_ip, server_port));
     unsafe {
