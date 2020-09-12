@@ -100,6 +100,50 @@ pub fn generate_response(packet: BootPacket) ->  BootPacket
     response_packet
 }
 
+fn parse_vendor_data(packet: &BootPacket) -> Vec::<VendorData> {
+    let mut vendor_data:Vec::<VendorData> = vec!();
+    let mut vend_itr  = packet._vendor_info.iter();
+    
+    let vendor_data = loop {
+        let next_code = vend_itr.next();
+
+        match next_code {
+            Some(code) => {
+                if (*code == 0) || (*code == 255) {
+                    vendor_data.push(VendorData{
+                        code: *code,
+                        len: 0,
+                        data: vec!()
+                    });
+                }else{
+                    let len = vend_itr.next().unwrap();
+                    let mut vend_info:Vec::<u8> = vec!();
+                    for  _i in 0..*len{
+                        let val = vend_itr.next();
+                        match val {
+                            Some(b) => vend_info.push(*b),
+                            None => {
+                                vend_info.clear();
+                                println!("invalid code = {} len = {} _i={}",
+                                         *code, len, _i);
+                                break
+                            }
+                        }
+                    };
+                    vendor_data.push(VendorData{
+                        code: *code,
+                        len: *len,
+                        data: vend_info
+                    });
+                }
+            },
+            None => break vendor_data
+        }
+    };
+    vendor_data
+}
+
+
 #[cfg(test)]
 mod tests {
     use std::env;
@@ -150,49 +194,9 @@ mod tests {
     #[test]
     fn test_parse_vendor_data() {
         let packet = read_packet();
+       let vendor_data:Vec::<VendorData> = parse_vendor_data(&packet);
 
-
-        let mut vendor_data:Vec::<VendorData> = vec!();
-        let mut vend_itr  = packet._vendor_info.iter();
-
-        let vendor_data = loop {
-            let next_code = vend_itr.next();
-
-            match next_code {
-                Some(code) => {
-                    if (*code == 0) || (*code == 255) {
-                        vendor_data.push(VendorData{
-                            code: *code,
-                            len: 0,
-                            data: vec!()
-                        });
-                    }else{
-                        let len = vend_itr.next().unwrap();
-                        let mut vend_info:Vec::<u8> = vec!();
-                        for  _i in 0..*len{
-                            let val = vend_itr.next();
-                            match val {
-                                Some(b) => vend_info.push(*b),
-                                None => {
-                                    vend_info.clear();
-                                    println!("invalid code = {} len = {} _i={}",
-                                             *code, len, _i);
-                                    break
-                                }
-                            }
-                        };
-                        vendor_data.push(VendorData{
-                            code: *code,
-                            len: *len,
-                            data: vend_info
-                        });
-                    }
-                },
-                None => break vendor_data
-            }
-        };
-
-        // These can all be found at:
+         // These can all be found at:
         // https://www.iana.org/assignments/bootp-dhcp-parameters/bootp-dhcp-parameters.xhtml
         
         {  // 53 DHCP Message type
@@ -252,9 +256,5 @@ mod tests {
             assert_eq!(23,  vendor_data[6].len);
             assert_eq!(0,  vendor_data[6].data.len());
         }        
-
-
     }
-    
-
 }
