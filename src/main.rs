@@ -5,30 +5,30 @@ use std::str::FromStr;
 use std::net::SocketAddr;
 use std::net::IpAddr;
 
-mod bootpacket;
+mod dhcp;
 
 
 fn handle_packet(server_port: u16, socket: &UdpSocket) ->
     std::io::Result<()>
 {
-    let mut packet = bootpacket::BootPacket::new();
+    let mut packet = dhcp::BootPacket::new();
     unsafe {
         let mut buf = transmute::<
-                bootpacket::BootPacket,
-            [u8; size_of::<bootpacket::BootPacket>()]>(packet);
+                dhcp::BootPacket,
+            [u8; size_of::<dhcp::BootPacket>()]>(packet);
         let (_amt, _src) = socket.recv_from(&mut buf)?;
-        packet = transmute::<[u8; size_of::<bootpacket::BootPacket>()],
-                             bootpacket::BootPacket>(buf);
+        packet = transmute::<[u8; size_of::<dhcp::BootPacket>()],
+                             dhcp::BootPacket>(buf);
     }
     println!("packet received");
     packet.log();
-    let response_packet = bootpacket::generate_response(packet);
+    let response_packet = dhcp::generate_response(packet);
     println!("sending packet");
     response_packet.log();
     let dest = SocketAddr::from(
         (response_packet.your_ip, server_port));
     unsafe {
-        let buf = transmute::<bootpacket::BootPacket,[u8; size_of::<bootpacket::BootPacket>()]>(
+        let buf = transmute::<dhcp::BootPacket,[u8; size_of::<dhcp::BootPacket>()]>(
             response_packet);
         socket.send_to(&buf, &dest)?;
     };
@@ -38,7 +38,7 @@ fn handle_packet(server_port: u16, socket: &UdpSocket) ->
 fn main() -> std::io::Result<()> {
     {
         println!("size of Boot Packet layout  = {0}",
-                 size_of::<bootpacket::BootPacket>());
+                 size_of::<dhcp::BootPacket>());
         let local_ip4 = IpAddr::from_str("0.0.0.0").unwrap();
         let server_port: u16  = 67;
         let socket = UdpSocket::bind(&SocketAddr::new(local_ip4, server_port))?;
