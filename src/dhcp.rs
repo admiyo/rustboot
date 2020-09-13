@@ -16,7 +16,8 @@ impl VendorData{
     pub fn new(code: u8, data: &Vec<u8>) ->Result<VendorData, ParseError>{
         let len = data.len();
 
-        if len > 60 {
+        //Kindof bogus, as no single field will be this long.
+        if len > 312 {
             return Err("vendor data too long")
         }else{
             return Ok(VendorData {
@@ -37,7 +38,7 @@ pub struct DHCPPacket{
     _hop_count: u8,
     _txn_id: [u8; 4],
     _num_secs: [u8; 2],
-    _unused: [u8;2],
+    _flags: [u8;2],
     _client_ip: [u8; 4],
     pub your_ip: [u8; 4],
     _server_ip: [u8; 4],
@@ -47,7 +48,7 @@ pub struct DHCPPacket{
     _server_host_name: [u8; 64],
     _boot_file_name: [u8; 128],
     _vendor_magic: [u8; 4],
-    _vendor_info: [u8; 60]
+    _vendor_info: [u8; 312]
 }
 
 
@@ -132,7 +133,10 @@ fn parse_vendor_data(packet: &DHCPPacket) -> Vec::<VendorData> {
 
         match next_code {
             Some(code) => {
-                if (*code == 0) || (*code == 255) {
+                if *code == 255{
+                    break vendor_data
+                }
+                if *code == 0   {
                     vendor_data.push(VendorData{
                         code: *code,
                         len: 0,
@@ -222,7 +226,9 @@ mod tests {
         let packet = read_packet();
         let vendor_data:Vec::<VendorData> = parse_vendor_data(&packet);
 
-         // These can all be found at:
+        assert_eq!(10,  vendor_data.len());
+
+        // These can all be found at:
         // https://www.iana.org/assignments/bootp-dhcp-parameters/bootp-dhcp-parameters.xhtml
 
         {  // 53 DHCP Message type
@@ -275,12 +281,39 @@ mod tests {
             assert_eq!(vec![105, 80, 88, 69],  vendor_data[5].data);
         }
         {
-            //The sample packet has a mangled value for Option 55.
             //55 Parameter Request List
             // https://tools.ietf.org/html/rfc2132#section-9.8
             assert_eq!(55, vendor_data[6].code);
             assert_eq!(23,  vendor_data[6].len);
-            assert_eq!(0,  vendor_data[6].data.len());
+            assert_eq!(23,  vendor_data[6].data.len());
+            assert_eq!(vec![1, 3, 6, 7, 12, 15, 17, 26, 43, 60, 66, 67, 119,
+                            128, 129, 130, 131, 132, 133, 134, 135, 175, 203],
+                       vendor_data[6].data);
+        }
+        {
+            // 175 = Etherboot?  Undocumented.
+            // 
+            assert_eq!(175, vendor_data[7].code);
+            assert_eq!(48,  vendor_data[7].len);            
+        }
+        {
+            // 61 = Client identifier
+            // https://tools.ietf.org/html/rfc2132#section-9.14
+            assert_eq!(61, vendor_data[8].code);
+            assert_eq!(7,  vendor_data[8].len);
+            assert_eq!(vec![1, 82, 84, 0, 148, 158, 242], vendor_data[8].data);
+
+        }
+
+        {
+            // Client Machine Identifie (GUID)
+            // https://tools.ietf.org/html/rfc4578#section-2.3
+            assert_eq!(97, vendor_data[9].code);
+            assert_eq!(17,  vendor_data[9].len);
+            assert_eq!(vec![0, 178, 35, 76, 56, 225, 195, 173, 69, 183,
+                            151, 210, 221, 34, 14, 27, 157],
+                       vendor_data[9].data);
+
         }
     }
 
@@ -298,7 +331,7 @@ mod tests {
 
     #[test]
     fn test_new_vendor_data_too_long() {
-        match VendorData::new(53, &vec![0; 88]){
+        match VendorData::new(53, &vec![0; 488]){
             Ok(vendor_data) => {
                 assert!(false, "vendor data {} would overun buffer",
                 vendor_data.data.len());
