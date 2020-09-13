@@ -30,7 +30,7 @@ impl VendorData{
 
 #[derive(Copy, Clone)]
 #[repr(C)]
-pub struct BootPacket{
+pub struct DHCPPacket{
     opcode: u8,
     _hwtype: u8,
     _hw_addr_len: u8,
@@ -52,13 +52,13 @@ pub struct BootPacket{
 
 
 
-impl BootPacket {
+impl DHCPPacket {
 
 
-    pub fn new() -> BootPacket{
-        let buf: [u8; size_of::<BootPacket>()] = [0; size_of::<BootPacket>()];
+    pub fn new() -> DHCPPacket{
+        let buf: [u8; size_of::<DHCPPacket>()] = [0; size_of::<DHCPPacket>()];
         unsafe {
-            transmute::<[u8; size_of::<BootPacket>()],BootPacket>(buf)
+            transmute::<[u8; size_of::<DHCPPacket>()],DHCPPacket>(buf)
         }
     }
 
@@ -109,7 +109,7 @@ To write a packet to a file
 
 */
 
-pub fn generate_response(packet: BootPacket) ->  BootPacket
+pub fn generate_response(packet: DHCPPacket) ->  DHCPPacket
 {
     let mut response_packet = packet;
 
@@ -123,7 +123,7 @@ pub fn generate_response(packet: BootPacket) ->  BootPacket
     response_packet
 }
 
-fn parse_vendor_data(packet: &BootPacket) -> Vec::<VendorData> {
+fn parse_vendor_data(packet: &DHCPPacket) -> Vec::<VendorData> {
     let mut vendor_data:Vec::<VendorData> = vec!();
     let mut vend_itr  = packet._vendor_info.iter();
 
@@ -176,28 +176,28 @@ mod tests {
     use std::convert::TryFrom;
 
 
-    fn read_packet() ->  BootPacket{
+    fn read_packet() ->  DHCPPacket{
         let cargo_manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
         let filename = format!("{}/boot-packet.bin",
                                cargo_manifest_dir);
 
         let f = File::open(filename).unwrap();
-        let take_size = u64::try_from(size_of::<BootPacket>()).unwrap();
+        let take_size = u64::try_from(size_of::<DHCPPacket>()).unwrap();
         let mut handle = f.take( take_size );
-        let mut buffer: [u8; size_of::<BootPacket>()] = [
-            0; size_of::<BootPacket>()];
+        let mut buffer: [u8; size_of::<DHCPPacket>()] = [
+            0; size_of::<DHCPPacket>()];
         handle.read(&mut buffer).unwrap();
 
         let packet =
         unsafe {
-                transmute::<[u8; size_of::<BootPacket>()],BootPacket>(buffer)
+                transmute::<[u8; size_of::<DHCPPacket>()],DHCPPacket>(buffer)
         };
         packet
     }
 
     #[test]
     fn test_create_packet() {
-        let packet = BootPacket::new();
+        let packet = DHCPPacket::new();
         assert_eq!(0, packet.opcode);
     }
 
@@ -208,10 +208,10 @@ mod tests {
         assert_eq!(1, packet._hwtype);
         assert_eq!(6, packet._hw_addr_len);
         assert_eq!(0, packet._hop_count);
-        assert_eq!(3704005645, packet.txn_id());
+        assert_eq!(4286046017, packet.txn_id());
 
 
-        let test_mac = MacAddress::new([0x52,0x54,0x00,0xE6,0x08,0x031]);
+        let test_mac = MacAddress::new([0x52,0x54,0x00,0x94,0x9e,0xf2]);
         assert_eq!(test_mac, packet.client_mac());
         assert_eq!([99,130,83,99],   packet.vendor_magic());
     }
