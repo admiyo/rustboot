@@ -12,20 +12,21 @@ pub struct VendorData{
 
 type ParseError = &'static str;
 
-pub fn new_vendor_data(code: u8, data: &Vec<u8>) ->Result<VendorData, ParseError>{
-    let len = data.len();
+impl VendorData{
+    pub fn new(code: u8, data: &Vec<u8>) ->Result<VendorData, ParseError>{
+        let len = data.len();
 
-    if len > 60 {
-        return Err("vendor data too long")
-    }else{
-        return Ok(VendorData {
-            code: code,
-            len: data.len() as u8,
-            data: data.to_vec()
-        })
+        if len > 60 {
+            return Err("vendor data too long")
+        }else{
+            return Ok(VendorData {
+                code: code,
+                len: data.len() as u8,
+                data: data.to_vec()
+            })
+        }
     }
 }
-
 
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -49,15 +50,18 @@ pub struct BootPacket{
     _vendor_info: [u8; 60]
 }
 
-pub fn alloc_boot_packet() -> BootPacket{
-    let buf: [u8; size_of::<BootPacket>()] = [0; size_of::<BootPacket>()];
-    unsafe {
-         transmute::<[u8; size_of::<BootPacket>()],BootPacket>(buf)
-    }
-}
 
 
 impl BootPacket {
+
+
+    pub fn new() -> BootPacket{
+        let buf: [u8; size_of::<BootPacket>()] = [0; size_of::<BootPacket>()];
+        unsafe {
+            transmute::<[u8; size_of::<BootPacket>()],BootPacket>(buf)
+        }
+    }
+
 
     pub fn client_mac(&self) ->  MacAddress{
         MacAddress::new(self._client_mac)
@@ -69,14 +73,17 @@ impl BootPacket {
         retval
     }
 
-    
+    pub fn txn_id(&self) -> u32  {
+        u32::from_be_bytes(self._txn_id)
+    }
+
     pub fn log(&self){
         println!("----------------------------------------------------");
         println!("opcode      = {0}", self.opcode);
         println!("hwtype      = {0}", self._hwtype);
         println!("hw addr len = {0}", self._hw_addr_len);
         println!("hop count   = {0}", self._hop_count);
-        println!("txn_id      = {:x}", u32::from_be_bytes(self._txn_id));
+        println!("txn_id      = {:x}", self.txn_id());
         println!("num_secs    = {:}", u16::from_be_bytes(self._num_secs));
         println!("client_ip   = {0} ", Ipv4Addr::from(self._client_ip));
         println!("your_ip     = {0} ", Ipv4Addr::from(self.your_ip));
@@ -119,7 +126,7 @@ pub fn generate_response(packet: BootPacket) ->  BootPacket
 fn parse_vendor_data(packet: &BootPacket) -> Vec::<VendorData> {
     let mut vendor_data:Vec::<VendorData> = vec!();
     let mut vend_itr  = packet._vendor_info.iter();
-    
+
     let vendor_data = loop {
         let next_code = vend_itr.next();
 
@@ -173,7 +180,7 @@ mod tests {
         let cargo_manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
         let filename = format!("{}/boot-packet.bin",
                                cargo_manifest_dir);
-        
+
         let f = File::open(filename).unwrap();
         let take_size = u64::try_from(size_of::<BootPacket>()).unwrap();
         let mut handle = f.take( take_size );
@@ -181,17 +188,16 @@ mod tests {
             0; size_of::<BootPacket>()];
         handle.read(&mut buffer).unwrap();
 
-        let packet = 
+        let packet =
         unsafe {
                 transmute::<[u8; size_of::<BootPacket>()],BootPacket>(buffer)
         };
         packet
     }
-    
 
     #[test]
     fn test_create_packet() {
-        let packet = alloc_boot_packet();
+        let packet = BootPacket::new();
         assert_eq!(0, packet.opcode);
     }
 
@@ -199,8 +205,12 @@ mod tests {
     fn test_parse_packet() {
         let packet = read_packet();
         assert_eq!(1, packet.opcode);
-        
-        assert_eq!(1, packet.opcode);
+        assert_eq!(1, packet._hwtype);
+        assert_eq!(6, packet._hw_addr_len);
+        assert_eq!(0, packet._hop_count);
+        assert_eq!(3704005645, packet.txn_id());
+
+
         let test_mac = MacAddress::new([0x52,0x54,0x00,0xE6,0x08,0x031]);
         assert_eq!(test_mac, packet.client_mac());
         assert_eq!([99,130,83,99],   packet.vendor_magic());
@@ -214,7 +224,7 @@ mod tests {
 
          // These can all be found at:
         // https://www.iana.org/assignments/bootp-dhcp-parameters/bootp-dhcp-parameters.xhtml
-        
+
         {  // 53 DHCP Message type
            // https://tools.ietf.org/html/rfc1533#section-9.4
             assert_eq!(53, vendor_data[0].code);
@@ -229,7 +239,7 @@ mod tests {
             assert_eq!(vec![5,192],  vendor_data[1].data);
         }
         {
-            // 93 = Client System Architecture Type Option Definition 
+            // 93 = Client System Architecture Type Option Definition
             // https://tools.ietf.org/html/rfc4578#section-2.1
             assert_eq!(93, vendor_data[2].code);
             assert_eq!(2,  vendor_data[2].len);
@@ -248,10 +258,10 @@ mod tests {
             assert_eq!(60, vendor_data[4].code);
             assert_eq!(32,  vendor_data[4].len);
             let vendor_class_id = std::str::from_utf8(
-                &vendor_data[4].data).unwrap(); 
+                &vendor_data[4].data).unwrap();
             assert_eq!(vendor_class_id.len(), usize::from(vendor_data[4].len));
             assert_eq!("PXEClient:Arch:00000:UNDI:002001", vendor_class_id);
-        }        
+        }
         {
             //77 User class info
             // https://tools.ietf.org/html/rfc3004#section-4
@@ -259,11 +269,11 @@ mod tests {
             assert_eq!(4,  vendor_data[5].len);
 
             let user_class_info = std::str::from_utf8(
-                &vendor_data[5].data).unwrap(); 
+                &vendor_data[5].data).unwrap();
             assert_eq!(user_class_info.len(), usize::from(vendor_data[5].len));
             assert_eq!("iPXE", user_class_info);
             assert_eq!(vec![105, 80, 88, 69],  vendor_data[5].data);
-        }        
+        }
         {
             //The sample packet has a mangled value for Option 55.
             //55 Parameter Request List
@@ -271,18 +281,52 @@ mod tests {
             assert_eq!(55, vendor_data[6].code);
             assert_eq!(23,  vendor_data[6].len);
             assert_eq!(0,  vendor_data[6].data.len());
-        }        
+        }
     }
 
     #[test]
     fn test_new_vendor_data_ok() {
-        match new_vendor_data(53, &vec![1]){
+        match VendorData::new(53, &vec![1]){
             Ok(vendor_data) => {
                 assert_eq!(53, vendor_data.code);
                 assert_eq!(1,  vendor_data.len);
                 assert_eq!(vec![1],  vendor_data.data);
             },
             Err(msg) =>  assert!(false, msg)
-        }   
+        }
     }
+
+    #[test]
+    fn test_new_vendor_data_too_long() {
+        match VendorData::new(53, &vec![0; 88]){
+            Ok(vendor_data) => {
+                assert!(false, "vendor data {} would overun buffer",
+                vendor_data.data.len());
+            },
+            Err(_) =>  assert!(true)
+        }
+    }
+
+    #[test]
+    fn test_write_vendor_data_to_buffer() {
+        match VendorData::new(53, &vec![1]){
+            Ok(vendor_data) => {
+                let mut buf:[u8; 4] = [9;4];
+                buf[3] = 9;
+                {//this code moves to a function
+                    buf[0] = vendor_data.code;
+                    buf[1] = vendor_data.len;
+
+                    for i in 0 .. vendor_data.data.len() {
+                        buf[i+2] = vendor_data.data[i];
+                    }
+                }
+
+                assert_eq!( buf[3], 9);
+            },
+            Err(msg) =>  assert!(false, msg)
+        }
+    }
+
+
 }

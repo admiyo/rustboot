@@ -11,7 +11,7 @@ mod bootpacket;
 fn handle_packet(server_port: u16, socket: &UdpSocket) ->
     std::io::Result<()>
 {
-    let mut packet = bootpacket::alloc_boot_packet();
+    let mut packet = bootpacket::BootPacket::new();
     unsafe {
         let mut buf = transmute::<
                 bootpacket::BootPacket,
