@@ -1,2 +1,5 @@
 /target
 Cargo.lock
+rusty-tags.emacs
+rusty-tags.vi
+
