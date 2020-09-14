@@ -5,7 +5,7 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::net::UdpSocket;
 use std::io::{Error, ErrorKind};
-use clap::App;
+use clap::{App, Arg};
 mod dhcp;
 
 
@@ -66,6 +66,18 @@ fn main() -> std::io::Result<()> {
         .subcommand(
             App::new("server")
                 .about("runs the DHCP server.")
+                .arg(
+                    Arg::with_name("log")
+                        .about("turn on logging")
+                        .short('l')
+                        .long("log"),
+                )
+                .arg(
+                    Arg::with_name("capture")
+                        .about("turn on packet capture")
+                        .short('c')
+                        .long("capture"),
+                )   
         )
         .get_matches();
 
