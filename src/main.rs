@@ -1,12 +1,14 @@
 use std::mem::transmute;
 use std::mem::size_of;
-use std::net::UdpSocket;
 use std::str::FromStr;
-use std::net::SocketAddr;
 use std::net::IpAddr;
+use std::net::SocketAddr;
+use std::net::UdpSocket;
 use std::io::{Error, ErrorKind};
-
+use clap::App;
 mod dhcp;
+
+
 
 fn handle_packet(server_port: u16, socket: &UdpSocket) ->
     std::io::Result<()>
@@ -41,17 +43,39 @@ fn handle_packet(server_port: u16, socket: &UdpSocket) ->
 }
 
 
-fn main() -> std::io::Result<()> {
-    {
-        println!("size of Boot Packet layout  = {0}",
-                 size_of::<dhcp::DHCPPacket>());
-        let local_ip4 = IpAddr::from_str("0.0.0.0").unwrap();
-        let server_port: u16  = 67;
-        let socket = UdpSocket::bind(&SocketAddr::new(local_ip4, server_port))?;
-        socket.set_broadcast(true).expect("set_broadcast call failed");
-        loop {
-            handle_packet(server_port, &socket)?
-        }
+
+fn run_server() -> std::io::Result<()> {
+
+    
+    println!("size of Boot Packet layout  = {0}",
+             size_of::<dhcp::DHCPPacket>());
+    let local_ip4 = IpAddr::from_str("0.0.0.0").unwrap();
+    let server_port: u16  = 67;
+    let socket = UdpSocket::bind(&SocketAddr::new(local_ip4, server_port))?;
+    socket.set_broadcast(true).expect("set_broadcast call failed");
+    loop {
+        handle_packet(server_port, &socket)?
     }
-    //Ok(())
+}
+
+fn main() -> std::io::Result<()> {
+    let matches = App::new("rustboot")
+        .version("1.0")
+        .author("Adamn Young<adam@younglogic.com>")
+        .about("DHCP server")
+        .subcommand(
+            App::new("server")
+                .about("runs the DHCP server.")
+        )
+        .get_matches();
+
+    match matches.subcommand_name() {
+        Some("server") => run_server(),
+        None => {
+            println!("No subcommand was used");
+            Ok(())
+        },
+        _ => unreachable!(),
+    }
+    
 }
