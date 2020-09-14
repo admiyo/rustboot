@@ -5,15 +5,15 @@ use std::net::Ipv4Addr;
 use std::vec::Vec;
 
 pub struct VendorData{
-    code: u8,
-    len: u8,
-    data: Vec<u8>
+    pub code: u8,
+    pub len: u8,
+    pub data: Vec<u8>
 }
 
-type ParseError = &'static str;
+const VENDOR_MAGIC:[u8; 4] = [99,130,83,99];
 
 impl VendorData{
-    pub fn new(code: u8, data: &Vec<u8>) ->Result<VendorData, ParseError>{
+    fn new(code: u8, data: &Vec<u8>) ->Result<VendorData, &'static str>{
         let len = data.len();
 
         //Kindof bogus, as no single field will be this long.
@@ -50,8 +50,6 @@ pub struct DHCPPacket{
     _vendor_magic: [u8; 4],
     _vendor_info: [u8; 312]
 }
-
-
 
 impl DHCPPacket {
 
@@ -92,84 +90,114 @@ impl DHCPPacket {
         println!("gateway_ip  = {0} ", Ipv4Addr::from(self._gateway_ip));
         println!("Mac Addr:   = {:}", self.client_mac());
     }
-}
+
+    //The packet should be copied when calling this function, as it will
+    //Be converted to a byte array for the write.
+    pub fn write_to_file(filename: &str, packet: DHCPPacket) {
+        use std::io::prelude::*;
+        use std::fs::File;
+        let mut pos = 0;
+        let mut buffer = File::create(filename).unwrap();
+        let buf = 
+        unsafe {
+            transmute::<DHCPPacket,
+                                  [u8; size_of::<DHCPPacket>()]>(packet)
+        };
+        while pos < buf.len() {
+            let bytes_written = buffer.write(&buf[pos..]).unwrap();
+            pos += bytes_written;
+        }
+    }
 
 
-/*
-To write a packet to a file
-        {
-            use std::io::prelude::*;
-            use std::fs::File;
-            let mut pos = 0;
-            let mut buffer = File::create("/tmp/foo.txt")?;
-            while pos < buf.len() {
-                let bytes_written = buffer.write(&buf[pos..])?;
-                pos += bytes_written;
+    pub fn generate_response(request_packet: &DHCPPacket) ->
+        Result<DHCPPacket, &'static str>
+    {
+        println!("packet received");
+        request_packet.log();
+
+        if request_packet.vendor_magic() != VENDOR_MAGIC{
+            return Err("Bad Vendor magic value");
+        }
+                
+        match request_packet.parse_vendor_data(){ 
+            Ok(options) => {
+                for option in options{
+                    println!("option code = {} len = {}",
+                             option.code, option.len);
+                }
+            },
+            Err(s) => {
+                println!("Bad Packet: {}", s);
+                return Err(s)
             }
         }
 
-*/
+        let mut response_packet = DHCPPacket::new();
+        let server_hostname = "ayoungP40";
+        response_packet._server_host_name[0..server_hostname.len()].
+            copy_from_slice(server_hostname.as_bytes());
 
-pub fn generate_response(packet: DHCPPacket) ->  DHCPPacket
-{
-    let mut response_packet = packet;
+        response_packet._server_ip =  Ipv4Addr::new(192,168,144,1).octets();
+        response_packet.your_ip =  Ipv4Addr::new(192,168,144,100).octets();
+        response_packet.opcode = 2;
+        
+        let mut vendor_data:Vec::<VendorData> = vec!();
+        vendor_data.push(VendorData::new(0, &vec![])?);
+        vendor_data.push(VendorData::new(255, &vec![])?);
 
-    let server_hostname = "ayoungP40";
-    response_packet._server_host_name[0..server_hostname.len()].
-        copy_from_slice(server_hostname.as_bytes());
+        println!("sending packet");
+        response_packet.log();
+        Ok(response_packet)
+    }
 
-    response_packet._server_ip =  Ipv4Addr::new(192,168,144,1).octets();
-    response_packet.your_ip =  Ipv4Addr::new(192,168,144,100).octets();
-    response_packet.opcode = 2;
-    response_packet
-}
+    pub fn parse_vendor_data(&self) -> Result<Vec::<VendorData>, &'static str>
+    {
+        let mut vendor_data:Vec::<VendorData> = vec!();
+        let mut vend_itr  = self._vendor_info.iter();
 
-fn parse_vendor_data(packet: &DHCPPacket) -> Vec::<VendorData> {
-    let mut vendor_data:Vec::<VendorData> = vec!();
-    let mut vend_itr  = packet._vendor_info.iter();
+        let vendor_data = loop {
+            let next_code = vend_itr.next();
 
-    let vendor_data = loop {
-        let next_code = vend_itr.next();
-
-        match next_code {
-            Some(code) => {
-                if *code == 255{
-                    break vendor_data
-                }
-                if *code == 0   {
-                    vendor_data.push(VendorData{
-                        code: *code,
-                        len: 0,
-                        data: vec!()
-                    });
-                }else{
-                    let len = vend_itr.next().unwrap();
-                    let mut vend_info:Vec::<u8> = vec!();
-                    for  _i in 0..*len{
-                        let val = vend_itr.next();
-                        match val {
-                            Some(b) => vend_info.push(*b),
-                            None => {
-                                vend_info.clear();
-                                println!("invalid code = {} len = {} _i={}",
-                                         *code, len, _i);
-                                break
+            match next_code {
+                Some(code) => {
+                    if *code == 255{
+                        break vendor_data
+                    }
+                    if *code == 0   {
+                        vendor_data.push(VendorData{
+                            code: *code,
+                            len: 0,
+                            data: vec!()
+                        });
+                    }else{
+                        let len = vend_itr.next().unwrap();
+                        let mut vend_info:Vec::<u8> = vec!();
+                        for  _i in 0..*len{
+                            let val = vend_itr.next();
+                            match val {
+                                Some(b) => vend_info.push(*b),
+                                None => {
+                                    vend_info.clear();
+                                    println!("invalid code = {} len = {} _i={}",
+                                             *code, len, _i);
+                                    break
+                                }
                             }
-                        }
-                    };
-                    vendor_data.push(VendorData{
-                        code: *code,
-                        len: *len,
-                        data: vend_info
-                    });
-                }
-            },
-            None => break vendor_data
-        }
-    };
-    vendor_data
+                        };
+                        vendor_data.push(VendorData{
+                            code: *code,
+                            len: *len,
+                            data: vend_info
+                        });
+                    }
+                },
+                None => break vendor_data
+            }
+        };
+        Ok(vendor_data)
+    }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -217,14 +245,15 @@ mod tests {
 
         let test_mac = MacAddress::new([0x52,0x54,0x00,0x94,0x9e,0xf2]);
         assert_eq!(test_mac, packet.client_mac());
-        assert_eq!([99,130,83,99],   packet.vendor_magic());
+
+        assert_eq!(VENDOR_MAGIC,   packet.vendor_magic());
     }
 
 
     #[test]
     fn test_parse_vendor_data() {
         let packet = read_packet();
-        let vendor_data:Vec::<VendorData> = parse_vendor_data(&packet);
+        let vendor_data:Vec::<VendorData> = packet.parse_vendor_data().unwrap();
 
         assert_eq!(10,  vendor_data.len());
 
@@ -354,12 +383,13 @@ mod tests {
                         buf[i+2] = vendor_data.data[i];
                     }
                 }
-
                 assert_eq!( buf[3], 9);
             },
             Err(msg) =>  assert!(false, msg)
         }
     }
-
-
+    #[test]
+    fn test_generate_response(){
+        assert!(!DHCPPacket::generate_response(&read_packet()).is_err());
+    }
 }

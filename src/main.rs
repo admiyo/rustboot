@@ -4,9 +4,9 @@ use std::net::UdpSocket;
 use std::str::FromStr;
 use std::net::SocketAddr;
 use std::net::IpAddr;
+use std::io::{Error, ErrorKind};
 
 mod dhcp;
-
 
 fn handle_packet(server_port: u16, socket: &UdpSocket) ->
     std::io::Result<()>
@@ -20,20 +20,26 @@ fn handle_packet(server_port: u16, socket: &UdpSocket) ->
         packet = transmute::<[u8; size_of::<dhcp::DHCPPacket>()],
                              dhcp::DHCPPacket>(buf);
     }
-    println!("packet received");
-    packet.log();
-    let response_packet = dhcp::generate_response(packet);
-    println!("sending packet");
-    response_packet.log();
-    let dest = SocketAddr::from(
-        (response_packet.your_ip, server_port));
-    unsafe {
-        let buf = transmute::<dhcp::DHCPPacket,[u8; size_of::<dhcp::DHCPPacket>()]>(
-            response_packet);
-        socket.send_to(&buf, &dest)?;
-    };
-    Ok(())
+    //last packet gets written.  We can and will do better.
+    dhcp::DHCPPacket::write_to_file("/tmp/rustboot_packet.bin", packet);
+
+    
+    match dhcp::DHCPPacket::generate_response(&packet){
+        Ok(response_packet)  => { 
+            let dest = SocketAddr::from(
+                (response_packet.your_ip, server_port));
+            unsafe {
+                let buf = transmute::<dhcp::DHCPPacket,
+                                      [u8; size_of::<dhcp::DHCPPacket>()]>(
+                    response_packet);
+                socket.send_to(&buf, &dest)?;
+            };
+            Ok(())
+        },
+        Err(s) => Err(Error::new(ErrorKind::Other, s))
+    }
 }
+
 
 fn main() -> std::io::Result<()> {
     {
