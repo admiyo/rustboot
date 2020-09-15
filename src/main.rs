@@ -7,7 +7,8 @@ use std::net::UdpSocket;
 use std::io::{Error, ErrorKind};
 use clap::{App, Arg};
 mod dhcp;
-
+extern crate num;
+extern crate num_derive;
 
 
 fn handle_packet(server_port: u16, socket: &UdpSocket) ->
@@ -85,7 +86,7 @@ fn main() -> std::io::Result<()> {
         Some("server") => run_server(),
         None => {
             println!("No subcommand was used");
-            Ok(())
+            run_server()
         },
         _ => unreachable!(),
     }

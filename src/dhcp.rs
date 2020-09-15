@@ -2,7 +2,11 @@ use std::mem::transmute;
 use std::mem::size_of;
 use mac_address::MacAddress;
 use std::net::Ipv4Addr;
+use std::collections::HashMap;
 use std::vec::Vec;
+use std::cmp::Eq;
+use std::cmp::PartialEq;
+use std::hash::Hash;
 
 pub struct VendorData{
     pub code: u8,
@@ -29,6 +33,49 @@ impl VendorData{
     }
 }
 
+// These can all be found at:
+// https://www.iana.org/assignments/bootp-dhcp-parameters/bootp-dhcp-parameters.xhtml
+#[derive(Eq, Hash, PartialEq,
+         ::num_derive::FromPrimitive,::num_derive::ToPrimitive)]
+#[repr(u8)]
+pub enum DHCPOptionCode{
+    Pad = 0,
+    // https://tools.ietf.org/html/rfc1533#section-9.4
+    DHCPMessageType = 53,
+    // https://tools.ietf.org/html/rfc2132#section-9.8
+    ParameterRequestList = 55,
+    // https://tools.ietf.org/html/rfc1533#section-9.8
+    MaximumDHCPMessageSize = 57,
+    //https://tools.ietf.org/html/rfc2132#section-9.13
+    VendorClassIdentifier = 60,
+    // https://tools.ietf.org/html/rfc2132#section-9.14
+    ClientIdentifier = 61,
+    // https://tools.ietf.org/html/rfc3004#section-4
+    UserClassInfo = 77,
+    // https://tools.ietf.org/html/rfc4578#section-2.1
+    ClientSystemArchitectureType = 93,
+    // https://tools.ietf.org/html/rfc4578#section-2.2
+    ClientNetworkInterfaceIdentifier = 94 ,
+    // https://tools.ietf.org/html/rfc4578#section-2.3
+    ClientMachineIdentifier = 97,
+    // 175 = Etherboot.  Undocumented.
+    Etherboot = 175,
+    End = 255
+}
+
+#[derive(Eq, Hash, PartialEq,::num_derive::FromPrimitive,::num_derive::ToPrimitive)]
+#[repr(u8)]
+pub enum DHCPMessageType {
+    DHCPDISCOVER = 1,
+    DHCPOFFER= 2,
+    DHCPREQUEST= 3,
+    DHCPDECLINE= 4,
+    DHCPACK= 5,
+    DHCPNAK= 6,
+    DHCPRELEASE= 7
+}
+
+
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct DHCPPacket{
@@ -52,15 +99,12 @@ pub struct DHCPPacket{
 }
 
 impl DHCPPacket {
-
-
     pub fn new() -> DHCPPacket{
         let buf: [u8; size_of::<DHCPPacket>()] = [0; size_of::<DHCPPacket>()];
         unsafe {
             transmute::<[u8; size_of::<DHCPPacket>()],DHCPPacket>(buf)
         }
     }
-
 
     pub fn client_mac(&self) ->  MacAddress{
         MacAddress::new(self._client_mac)
@@ -98,17 +142,16 @@ impl DHCPPacket {
         use std::fs::File;
         let mut pos = 0;
         let mut buffer = File::create(filename).unwrap();
-        let buf = 
-        unsafe {
-            transmute::<DHCPPacket,
-                                  [u8; size_of::<DHCPPacket>()]>(packet)
-        };
+        let buf =
+            unsafe {
+                transmute::<DHCPPacket,
+                            [u8; size_of::<DHCPPacket>()]>(packet)
+            };
         while pos < buf.len() {
             let bytes_written = buffer.write(&buf[pos..]).unwrap();
             pos += bytes_written;
         }
     }
-
 
     pub fn generate_response(request_packet: &DHCPPacket) ->
         Result<DHCPPacket, &'static str>
@@ -119,12 +162,11 @@ impl DHCPPacket {
         if request_packet.vendor_magic() != VENDOR_MAGIC{
             return Err("Bad Vendor magic value");
         }
-                
-        match request_packet.parse_vendor_data(){ 
+        match request_packet.parse_vendor_data(){
             Ok(options) => {
-                for option in options{
+                for (code, option) in options{
                     println!("option code = {} len = {}",
-                             option.code, option.len);
+                             code as u8, option.len);
                 }
             },
             Err(s) => {
@@ -137,11 +179,16 @@ impl DHCPPacket {
         let server_hostname = "ayoungP40";
         response_packet._server_host_name[0..server_hostname.len()].
             copy_from_slice(server_hostname.as_bytes());
-
+        response_packet._vendor_magic = VENDOR_MAGIC;
+        response_packet.opcode = 2;
+        response_packet._hwtype = response_packet._hwtype;
+        response_packet._hw_addr_len = response_packet._hw_addr_len;
+        response_packet._client_mac = response_packet._client_mac;
+        response_packet._txn_id = response_packet._txn_id;
         response_packet._server_ip =  Ipv4Addr::new(192,168,144,1).octets();
         response_packet.your_ip =  Ipv4Addr::new(192,168,144,100).octets();
-        response_packet.opcode = 2;
-        
+
+        //TODO write vendor data to packet
         let mut vendor_data:Vec::<VendorData> = vec!();
         vendor_data.push(VendorData::new(0, &vec![])?);
         vendor_data.push(VendorData::new(255, &vec![])?);
@@ -151,11 +198,12 @@ impl DHCPPacket {
         Ok(response_packet)
     }
 
-    pub fn parse_vendor_data(&self) -> Result<Vec::<VendorData>, &'static str>
+    pub fn parse_vendor_data(&self) ->
+        Result<HashMap::<DHCPOptionCode, VendorData>, &'static str>
     {
-        let mut vendor_data:Vec::<VendorData> = vec!();
+        let mut vendor_data:HashMap::<DHCPOptionCode, VendorData>
+            = HashMap::new();
         let mut vend_itr  = self._vendor_info.iter();
-
         let vendor_data = loop {
             let next_code = vend_itr.next();
 
@@ -165,12 +213,9 @@ impl DHCPPacket {
                         break vendor_data
                     }
                     if *code == 0   {
-                        vendor_data.push(VendorData{
-                            code: *code,
-                            len: 0,
-                            data: vec!()
-                        });
+                        continue;
                     }else{
+                        //TODO error handling
                         let len = vend_itr.next().unwrap();
                         let mut vend_info:Vec::<u8> = vec!();
                         for  _i in 0..*len{
@@ -185,11 +230,17 @@ impl DHCPPacket {
                                 }
                             }
                         };
-                        vendor_data.push(VendorData{
-                            code: *code,
-                            len: *len,
-                            data: vend_info
-                        });
+
+                        match num::FromPrimitive::from_u8(*code) {
+                            Some(m_t_c) => {vendor_data.insert(m_t_c, VendorData{
+                                code: *code,
+                                len: *len,
+                                data: vend_info});
+                            },
+                            None  => {
+                                println!("unknown type code {}", *code);
+                            }
+                        };
                     }
                 },
                 None => break vendor_data
@@ -207,7 +258,6 @@ mod tests {
     use super::*;
     use std::convert::TryFrom;
 
-
     fn read_packet() ->  DHCPPacket{
         let cargo_manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
         let filename = format!("{}/boot-packet.bin",
@@ -221,9 +271,9 @@ mod tests {
         handle.read(&mut buffer).unwrap();
 
         let packet =
-        unsafe {
+            unsafe {
                 transmute::<[u8; size_of::<DHCPPacket>()],DHCPPacket>(buffer)
-        };
+            };
         packet
     }
 
@@ -249,100 +299,130 @@ mod tests {
         assert_eq!(VENDOR_MAGIC,   packet.vendor_magic());
     }
 
-
     #[test]
     fn test_parse_vendor_data() {
         let packet = read_packet();
-        let vendor_data:Vec::<VendorData> = packet.parse_vendor_data().unwrap();
+        let vendor_data = packet.parse_vendor_data().unwrap();
 
         assert_eq!(10,  vendor_data.len());
 
-        // These can all be found at:
-        // https://www.iana.org/assignments/bootp-dhcp-parameters/bootp-dhcp-parameters.xhtml
-
-        {  // 53 DHCP Message type
-           // https://tools.ietf.org/html/rfc1533#section-9.4
-            assert_eq!(53, vendor_data[0].code);
-            assert_eq!(1,  vendor_data[0].len);
-            assert_eq!(vec![1],  vendor_data[0].data);
-        }
-        {
-            // 57 = Maximum DHCP Message Size
-            // https://tools.ietf.org/html/rfc1533#section-9.8
-            assert_eq!(57, vendor_data[1].code);
-            assert_eq!(2,  vendor_data[1].len);
-            assert_eq!(vec![5,192],  vendor_data[1].data);
-        }
-        {
-            // 93 = Client System Architecture Type Option Definition
-            // https://tools.ietf.org/html/rfc4578#section-2.1
-            assert_eq!(93, vendor_data[2].code);
-            assert_eq!(2,  vendor_data[2].len);
-            // 0 = Intel
-            assert_eq!(vec![0, 0],  vendor_data[2].data);
-        }
-        {
-            // 94 = Client Network Interface Identifier Option Definition
-            // https://tools.ietf.org/html/rfc4578#section-2.2
-            assert_eq!(94, vendor_data[3].code);
-            assert_eq!(3,  vendor_data[3].len);
-            assert_eq!(vec![1, 2, 1],  vendor_data[3].data);
-        }
-        {
-            //https://tools.ietf.org/html/rfc2132#section-9.13
-            assert_eq!(60, vendor_data[4].code);
-            assert_eq!(32,  vendor_data[4].len);
-            let vendor_class_id = std::str::from_utf8(
-                &vendor_data[4].data).unwrap();
-            assert_eq!(vendor_class_id.len(), usize::from(vendor_data[4].len));
-            assert_eq!("PXEClient:Arch:00000:UNDI:002001", vendor_class_id);
-        }
-        {
-            //77 User class info
-            // https://tools.ietf.org/html/rfc3004#section-4
-            assert_eq!(77, vendor_data[5].code);
-            assert_eq!(4,  vendor_data[5].len);
-
-            let user_class_info = std::str::from_utf8(
-                &vendor_data[5].data).unwrap();
-            assert_eq!(user_class_info.len(), usize::from(vendor_data[5].len));
-            assert_eq!("iPXE", user_class_info);
-            assert_eq!(vec![105, 80, 88, 69],  vendor_data[5].data);
-        }
-        {
-            //55 Parameter Request List
-            // https://tools.ietf.org/html/rfc2132#section-9.8
-            assert_eq!(55, vendor_data[6].code);
-            assert_eq!(23,  vendor_data[6].len);
-            assert_eq!(23,  vendor_data[6].data.len());
-            assert_eq!(vec![1, 3, 6, 7, 12, 15, 17, 26, 43, 60, 66, 67, 119,
-                            128, 129, 130, 131, 132, 133, 134, 135, 175, 203],
-                       vendor_data[6].data);
-        }
-        {
-            // 175 = Etherboot?  Undocumented.
-            // 
-            assert_eq!(175, vendor_data[7].code);
-            assert_eq!(48,  vendor_data[7].len);            
-        }
-        {
-            // 61 = Client identifier
-            // https://tools.ietf.org/html/rfc2132#section-9.14
-            assert_eq!(61, vendor_data[8].code);
-            assert_eq!(7,  vendor_data[8].len);
-            assert_eq!(vec![1, 82, 84, 0, 148, 158, 242], vendor_data[8].data);
-
+        match vendor_data.get(&DHCPOptionCode::DHCPMessageType){
+            Some(option) =>  {
+                assert_eq!(DHCPOptionCode::DHCPMessageType as u8, option.code);
+                assert_eq!(1,  option.len);
+                assert_eq!(vec![1],  option.data);
+            },
+            None => {
+                assert!(false, "Vendor data is mising option 53");
+            }
         }
 
-        {
-            // Client Machine Identifie (GUID)
-            // https://tools.ietf.org/html/rfc4578#section-2.3
-            assert_eq!(97, vendor_data[9].code);
-            assert_eq!(17,  vendor_data[9].len);
-            assert_eq!(vec![0, 178, 35, 76, 56, 225, 195, 173, 69, 183,
-                            151, 210, 221, 34, 14, 27, 157],
-                       vendor_data[9].data);
+        match vendor_data.get(&DHCPOptionCode::MaximumDHCPMessageSize){
+            Some(option) =>  {
+                assert_eq!(DHCPOptionCode::MaximumDHCPMessageSize as u8, option.code);
+                assert_eq!(2,  option.len);
+                assert_eq!(vec![5,192],  option.data);
+            },
+            None => {
+                assert!(false, "Vendor data is mising option ");
+            }
+        }
 
+        match vendor_data.get(&DHCPOptionCode::ClientSystemArchitectureType){
+            Some(option) =>  {
+                assert_eq!(DHCPOptionCode::ClientSystemArchitectureType as u8,
+                           option.code);
+                assert_eq!(2,  option.len);
+                // 0 = Intel
+                assert_eq!(vec![0, 0],  option.data);
+            }
+            None => {
+                assert!(false, "Vendor data is mising option ");
+            }
+        }
+
+        match vendor_data.get(&DHCPOptionCode::ClientNetworkInterfaceIdentifier){
+            Some(option) =>  {
+
+                assert_eq!(DHCPOptionCode::ClientNetworkInterfaceIdentifier as u8, option.code);
+                assert_eq!(3,  option.len);
+                assert_eq!(vec![1, 2, 1],  option.data);
+            } ,           None => {
+                assert!(false, "Vendor data is mising option ");
+            }
+        }
+
+        match vendor_data.get(&DHCPOptionCode::VendorClassIdentifier){
+            Some(option) =>  {
+                assert_eq!(60, option.code);
+                assert_eq!(32,  option.len);
+                let vendor_class_id = std::str::from_utf8(
+                    &option.data).unwrap();
+                assert_eq!(vendor_class_id.len(), usize::from(option.len));
+                assert_eq!("PXEClient:Arch:00000:UNDI:002001", vendor_class_id);
+            },           None => {
+                assert!(false, "Vendor data is mising option ");
+            }
+        }
+        match vendor_data.get(&DHCPOptionCode::UserClassInfo){
+            Some(option) =>  {
+                assert_eq!(77, option.code);
+                assert_eq!(4,  option.len);
+
+                let user_class_info = std::str::from_utf8(
+                    &option.data).unwrap();
+                assert_eq!(user_class_info.len(), usize::from(option.len));
+                assert_eq!("iPXE", user_class_info);
+                assert_eq!(vec![105, 80, 88, 69],  option.data);
+            },           None => {
+                assert!(false, "Vendor data is mising option ");
+            }
+        }
+        match vendor_data.get(&DHCPOptionCode::ParameterRequestList){
+            Some(option) =>  {
+
+                assert_eq!(55, option.code);
+                assert_eq!(23,  option.len);
+                assert_eq!(23,  option.data.len());
+                assert_eq!(vec![1, 3, 6, 7, 12, 15, 17, 26, 43, 60, 66, 67, 119,
+                                128, 129, 130, 131, 132, 133, 134, 135, 175, 203],
+                           option.data);
+            },           None => {
+                assert!(false, "Vendor data is mising option ");
+            }
+        }
+        match vendor_data.get(&DHCPOptionCode::Etherboot){
+            Some(option) =>  {
+
+                assert_eq!(175, option.code);
+                assert_eq!(48,  option.len);
+            },           None => {
+                assert!(false, "Vendor data is mising option ");
+            }
+        }
+        match vendor_data.get(&DHCPOptionCode::ClientIdentifier){
+            Some(option) =>  {
+                assert_eq!(61, option.code);
+                assert_eq!(7,  option.len);
+                assert_eq!(vec![1, 82, 84, 0, 148, 158, 242], option.data);
+
+            },           None => {
+                assert!(false, "Vendor data is mising option ");
+            }
+        }
+
+        match vendor_data.get(&DHCPOptionCode::ClientMachineIdentifier){
+            Some(option) =>  {
+
+                assert_eq!(97, option.code);
+                assert_eq!(17, option.len);
+                assert_eq!(vec![0, 178, 35, 76, 56, 225, 195, 173, 69, 183,
+                                151, 210, 221, 34, 14, 27, 157],
+                           option.data);
+
+            },           None => {
+                assert!(false, "Vendor data is mising option ");
+            }
         }
     }
 
@@ -363,7 +443,7 @@ mod tests {
         match VendorData::new(53, &vec![0; 488]){
             Ok(vendor_data) => {
                 assert!(false, "vendor data {} would overun buffer",
-                vendor_data.data.len());
+                        vendor_data.data.len());
             },
             Err(_) =>  assert!(true)
         }
