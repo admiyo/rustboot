@@ -156,6 +156,8 @@ impl DHCPPacket {
     pub fn generate_response(request_packet: &DHCPPacket) ->
         Result<DHCPPacket, &'static str>
     {
+        println!("packet received");
+        request_packet.log();
 
         if request_packet.vendor_magic() != VENDOR_MAGIC{
             return Err("Bad Vendor magic value");
@@ -191,6 +193,8 @@ impl DHCPPacket {
         vendor_data.push(VendorData::new(0, &vec![])?);
         vendor_data.push(VendorData::new(255, &vec![])?);
 
+        println!("sending packet");
+        response_packet.log();
         Ok(response_packet)
     }
 
