@@ -14,10 +14,10 @@ pub struct VendorData{
     pub data: Vec<u8>
 }
 
-const VENDOR_MAGIC:[u8; 4] = [99,130,83,99];
+pub const VENDOR_MAGIC:[u8; 4] = [99,130,83,99];
 
 impl VendorData{
-    fn new(code: DHCPOptionCode, data: &Vec<u8>) ->Result<VendorData, &'static str>{
+    pub fn new(code: DHCPOptionCode, data: &Vec<u8>) ->Result<VendorData, &'static str>{
         let len = data.len();
 
         //Kindof bogus, as no single field will be this long.
@@ -32,7 +32,7 @@ impl VendorData{
         }
     }
 
-    fn write(&self, buf:  & mut[u8; 312], mut offset: usize) -> usize{
+    pub fn write(&self, buf:  & mut[u8; 312], mut offset: usize) -> usize{
 
         //add 2;  one for the op code.  One for the len, and one to advance
         // past the end of the data section
@@ -149,23 +149,23 @@ pub enum DHCPMessageType {
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct DHCPPacket{
-    opcode: u8,
-    _hwtype: u8,
-    _hw_addr_len: u8,
-    _hop_count: u8,
-    _txn_id: [u8; 4],
-    _num_secs: [u8; 2],
-    _flags: [u8;2],
-    _client_ip: [u8; 4],
+    pub opcode: u8,
+    pub _hwtype: u8,
+    pub _hw_addr_len: u8,
+    pub _hop_count: u8,
+    pub _txn_id: [u8; 4],
+    pub _num_secs: [u8; 2],
+    pub _flags: [u8;2],
+    pub _client_ip: [u8; 4],
     pub your_ip: [u8; 4],
-    _server_ip: [u8; 4],
-    _gateway_ip: [u8; 4],
-    _client_mac: [u8; 6],
-    _client_mac_remainder: [u8; 10],
-    _server_host_name: [u8; 64],
-    _boot_file_name: [u8; 128],
-    _vendor_magic: [u8; 4],
-    _vendor_info: [u8; 312]
+    pub _server_ip: [u8; 4],
+    pub _gateway_ip: [u8; 4],
+    pub _client_mac: [u8; 6],
+    pub _client_mac_remainder: [u8; 10],
+    pub _server_host_name: [u8; 64],
+    pub _boot_file_name: [u8; 128],
+    pub _vendor_magic: [u8; 4],
+    pub _vendor_info: [u8; 312]
 }
 
 impl DHCPPacket {
@@ -222,124 +222,11 @@ impl DHCPPacket {
         }
     }
 
-    fn set_common_fields(request_packet: &DHCPPacket, response_packet:  &mut DHCPPacket){
-        let server_hostname = "ayoungP40";
-        response_packet._server_host_name[0..server_hostname.len()].
-            copy_from_slice(server_hostname.as_bytes());
-        response_packet._vendor_magic = VENDOR_MAGIC;
-        response_packet.opcode = DHCPOptCodes::RESPONSE as u8;
-        response_packet._hwtype = request_packet._hwtype;
-        response_packet._hw_addr_len =  request_packet._hw_addr_len;
-        response_packet._client_mac =  request_packet._client_mac;
-        response_packet._txn_id =  request_packet._txn_id;
-        response_packet._server_ip =  Ipv4Addr::new(192,168,144,1).octets();
-        response_packet.your_ip =  Ipv4Addr::new(192,168,144,100).octets();
 
-        for i in 0..response_packet._vendor_info.len(){
-            response_packet._vendor_info[i] = DHCPOptionCode::End as u8;
-        }
-    }
-
-    fn handle_dhcprequest(request_packet: &DHCPPacket) ->  Result<DHCPPacket, &'static str>{
-        let mut response_packet = DHCPPacket::new();
-        DHCPPacket::set_common_fields(request_packet, &mut response_packet);
-
-        let mut vendor_data:Vec::<VendorData> = vec!();
-
-        vendor_data.push(VendorData::new(DHCPOptionCode::DHCPMessageType,
-             &vec![DHCPMessageType::DHCPACK as u8])?);
-
-        vendor_data.push(VendorData::new(DHCPOptionCode::SubnetMask,
-            &vec![255,255,255,0])?);
-
-        vendor_data.push(VendorData::new(DHCPOptionCode::Router,
-            &vec![192,168,123,1])?);
-
-        let lease_time: u32 = 86400;
-        let lease_type_bytes: Vec<u8> = u32::to_be_bytes(lease_time).to_vec();
-        vendor_data.push(VendorData::new(DHCPOptionCode::IPAddressLeaseTime,
-            &lease_type_bytes)?);
-    
-        vendor_data.push(VendorData::new(DHCPOptionCode::DHCPServer,
-            &vec![192,168,123,1])?);
-
-        vendor_data.push(VendorData::new(DHCPOptionCode::DNSServers,
-            &vec![75,75,75,75,75,75,75,76,8,8,8,8])?);
-
-
-        let mut offset = 0;
-             for opt in vendor_data{
-                 offset = opt.write(&mut response_packet._vendor_info, offset)
-             }
-
-        Ok(response_packet)
-    }
-
-    fn handle_dhcpdiscover(request_packet: &DHCPPacket) ->  Result<DHCPPacket, &'static str>{
-        let mut response_packet = DHCPPacket::new();
-
-        DHCPPacket::set_common_fields(request_packet, &mut response_packet);
-
-        //TODO find a safe way to do this gracefully
-        let _boot_file_name = "pxelinux/pxelinux.0".as_bytes();
-        for i in 0.._boot_file_name.len() {
-            response_packet._boot_file_name[i] =  _boot_file_name[i]
-        }
-        //TODO write vendor data to packet
-        let mut vendor_data:Vec::<VendorData> = vec!();
-
-        vendor_data.push(VendorData::new(DHCPOptionCode::DHCPMessageType,
-             &vec![DHCPMessageType::DHCPOFFER as u8])?);
-        vendor_data.push(VendorData::new(DHCPOptionCode::DomainSearch,
-            &"younglogic.net".as_bytes().to_vec())?);
-        vendor_data.push(VendorData::new(DHCPOptionCode::PXE128,
-                &"".as_bytes().to_vec())?);
-
-        let mut offset = 0;
-        for opt in vendor_data{
-            offset = opt.write(&mut response_packet._vendor_info, offset)
-        }
-
-        Ok(response_packet)
-    }
-
-    fn dump_options(options: &HashMap::<DHCPOptionCode, VendorData>){
+    pub fn dump_options(options: &HashMap::<DHCPOptionCode, VendorData>){
         for (_code, option) in options{
             println!("option code = {} len = {}",
                      option.code as u8, option.len);
-        }
-    }
-
-    pub fn generate_response(request_packet: &DHCPPacket) ->
-        Result<DHCPPacket, &'static str>
-    {
-        if request_packet.vendor_magic() != VENDOR_MAGIC{
-            return Err("Bad Vendor magic value");
-        }
-        let options = match request_packet.parse_vendor_data() {
-            Ok(options) => options,
-            Err(s) => {
-                println!("Bad Packet: {}", s);
-                return Err(s)
-            }
-        };
-        DHCPPacket::dump_options(&options);
-        match options.get(&DHCPOptionCode::DHCPMessageType){
-            Some(option) => {
-                if option.len != 1 {
-                    return Err("malformed DHCPMessageType option");
-                }
-                let message_type: DHCPMessageType = match num::FromPrimitive::from_u8(option.data[0]){
-                    Some(message_type) => message_type,
-                    None =>  return Err("unknown message type")
-                };
-                match message_type{
-                    DHCPMessageType::DHCPDISCOVER => DHCPPacket::handle_dhcpdiscover(request_packet),
-                    DHCPMessageType::DHCPREQUEST => DHCPPacket::handle_dhcprequest(request_packet),
-                    _ => return Err("cannot handle request for type")
-                }
-            },
-            None =>  return Err("unknown message type")
         }
     }
 
@@ -615,60 +502,5 @@ mod tests {
             Err(msg) =>  assert!(false, msg)
         }
     }
-    #[test]
-    fn test_handle_discover(){
-        let response_packet = DHCPPacket::handle_dhcpdiscover(&read_discovery_packet()).unwrap();
-        assert_eq!(response_packet.opcode, DHCPMessageType::DHCPOFFER as u8);
-        let vendor_data = response_packet.parse_vendor_data().unwrap();
-        assert_eq!(vendor_data.len(), 3);
-        match vendor_data.get(&DHCPOptionCode::DHCPMessageType){
-            Some(option) =>  {
-                assert_eq!(DHCPOptionCode::DHCPMessageType as u8, option.code);
-                assert_eq!(1,  option.len);
-                assert_eq!(vec![DHCPMessageType::DHCPOFFER as u8],  option.data);
-            },
-            None => {
-                assert!(false, "Vendor data is mising Message Type Value");
-            }
-        }
-    }
 
-    #[test]
-    fn test_handle_dhcprequest(){
-        let response_packet = DHCPPacket::handle_dhcprequest(&read_discovery_packet()).unwrap();
-        assert_eq!(response_packet.opcode, DHCPOptCodes::RESPONSE as u8);
-        let vendor_data = response_packet.parse_vendor_data().unwrap();
-        assert_eq!(vendor_data.len(), 6);
-        match vendor_data.get(&DHCPOptionCode::DHCPMessageType){
-            Some(option) =>  {
-                assert_eq!(DHCPOptionCode::DHCPMessageType as u8, option.code);
-                assert_eq!(1,  option.len);
-                assert_eq!(vec![DHCPMessageType::DHCPACK as u8],  option.data);
-            },
-            None => {
-                assert!(false, "Vendor data is mising Message Type Value");
-            }
-        }
-        match vendor_data.get(&DHCPOptionCode::DNSServers){
-            Some(option) =>  {
-                assert_eq!(DHCPOptionCode::DNSServers as u8, option.code);
-                assert_eq!(12,  option.len);
-                assert_eq!(vec![75, 75, 75, 75, 75, 75, 75, 76, 8, 8, 8, 8],
-                  option.data);
-            },
-            None => {
-                assert!(false, "Vendor data is mising Message Type Value");
-            }
-        }
-        match vendor_data.get(&DHCPOptionCode::IPAddressLeaseTime){
-            Some(option) =>  {
-                assert_eq!(DHCPOptionCode::IPAddressLeaseTime as u8, option.code);
-                assert_eq!(4,  option.len);
-                assert_eq!(vec![0,1,81,128],  option.data);
-            },
-            None => {
-                assert!(false, "Vendor data is mising Message Type Value");
-            }
-        }
-    }
 }
