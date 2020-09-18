@@ -122,9 +122,6 @@ impl DHCPServer{
         response_packet._server_ip =  Ipv4Addr::new(192,168,144,1).octets();
         response_packet.your_ip =  Ipv4Addr::new(192,168,144,100).octets();
 
-        for i in 0..response_packet._vendor_info.len(){
-            response_packet._vendor_info[i] = DHCPOptionCode::End as u8;
-        }
     }
 
     fn handle_dhcprequest(&self, request_packet: &DHCPPacket) ->  Result<DHCPPacket, &'static str>{
@@ -152,6 +149,7 @@ impl DHCPServer{
 
         vendor_data.push(VendorData::new(DHCPOptionCode::DNSServers,
             &vec![75,75,75,75,75,75,75,76,8,8,8,8])?);
+        vendor_data.push(VendorData::END);
 
 
         let mut offset = 0;
@@ -172,7 +170,6 @@ impl DHCPServer{
         for i in 0.._boot_file_name.len() {
             response_packet._boot_file_name[i] =  _boot_file_name[i]
         }
-        //TODO write vendor data to packet
         let mut vendor_data:Vec::<VendorData> = vec!();
 
         vendor_data.push(VendorData::new(DHCPOptionCode::DHCPMessageType,
@@ -181,6 +178,7 @@ impl DHCPServer{
             &"younglogic.net".as_bytes().to_vec())?);
         vendor_data.push(VendorData::new(DHCPOptionCode::PXE128,
                 &"".as_bytes().to_vec())?);
+        vendor_data.push(VendorData::END);
 
         let mut offset = 0;
         for opt in vendor_data{

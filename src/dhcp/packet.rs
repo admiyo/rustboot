@@ -17,6 +17,13 @@ pub struct VendorData{
 pub const VENDOR_MAGIC:[u8; 4] = [99,130,83,99];
 
 impl VendorData{
+
+    pub const END: VendorData = VendorData{
+        code: DHCPOptionCode::End as u8,
+        len:0,
+        data: vec![]
+    };
+
     pub fn new(code: DHCPOptionCode, data: &Vec<u8>) ->Result<VendorData, &'static str>{
         let len = data.len();
 
@@ -31,6 +38,8 @@ impl VendorData{
             })
         }
     }
+
+
 
     pub fn write(&self, buf:  & mut[u8; 312], mut offset: usize) -> usize{
 
