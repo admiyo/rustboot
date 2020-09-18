@@ -24,28 +24,25 @@ extern crate num_derive;
 
 pub struct DHCPServer{
     logging: bool,
+    local_ipv4: IpAddr,
     capture: bool,
     capture_dir: String,
     server_port: u16,
-    socket: UdpSocket
 }
 
 impl DHCPServer{
     pub fn new(logging: bool, capture: bool, capture_dir: &str) -> Result <DHCPServer, Error>  {
         let local_ip4 = IpAddr::from_str("0.0.0.0").unwrap();
-        let server_port: u16  = 67;
-        let socket = UdpSocket::bind(&SocketAddr::new(local_ip4, server_port))?;
-        socket.set_broadcast(true).expect("set_broadcast call failed");
         return Ok(DHCPServer{
             capture: capture,
             capture_dir: String::from_str(capture_dir).unwrap(),
+            local_ipv4: local_ip4,
             logging: logging,
             server_port: 67,
-            socket: socket
         });
     }
 
-    fn handle_packet(&self) ->
+    fn handle_packet(&self, socket: &UdpSocket) ->
         std::io::Result<()>
     {
         let mut packet = DHCPPacket::new();
@@ -53,7 +50,7 @@ impl DHCPServer{
             let mut buf = transmute::<
                     DHCPPacket,
                 [u8; size_of::<DHCPPacket>()]>(packet);
-            let (_amt, _src) = self.socket.recv_from(&mut buf)?;
+            let (_amt, _src) = socket.recv_from(&mut buf)?;
             packet = transmute::<[u8; size_of::<DHCPPacket>()],
                                  DHCPPacket>(buf);
         }
@@ -69,7 +66,7 @@ impl DHCPServer{
                 "{}/packet.{:?}.in.bin", self.capture_dir, date_time);
             DHCPPacket::write_to_file(&capture_file, packet);
         }
-        match DHCPServer::generate_response(&packet){
+        match self.generate_response(&packet){
             Ok(response_packet)  => {
                 if self.logging {
                     println!("sending packet");
@@ -90,7 +87,7 @@ impl DHCPServer{
                             DHCPPacket,[
                                 u8; size_of::<DHCPPacket>()]>(
                         response_packet);
-                    self.socket.send_to(&buf, &dest)?;
+                    socket.send_to(&buf, &dest)?;
                 };
                 Ok(())
             },
@@ -99,6 +96,8 @@ impl DHCPServer{
     }
 
     pub fn run(&self) -> std::io::Result<()> {
+        let socket = UdpSocket::bind(&SocketAddr::new(self.local_ipv4, self.server_port))?;
+        socket.set_broadcast(true).expect("set_broadcast call failed");
 
         if self.capture{
             fs::create_dir_all(&self.capture_dir)?;
@@ -106,10 +105,10 @@ impl DHCPServer{
         println!("size of Boot Packet layout  = {0}",
                  size_of::<DHCPPacket>());
         loop {
-            self.handle_packet()?
+            self.handle_packet(&socket)?
         }
     }
-    fn set_common_fields(request_packet: &DHCPPacket, response_packet:  &mut DHCPPacket){
+    fn set_common_fields(&self, request_packet: &DHCPPacket, response_packet:  &mut DHCPPacket){
         let server_hostname = "ayoungP40";
         response_packet._server_host_name[0..server_hostname.len()].
             copy_from_slice(server_hostname.as_bytes());
@@ -128,9 +127,9 @@ impl DHCPServer{
         }
     }
 
-    fn handle_dhcprequest(request_packet: &DHCPPacket) ->  Result<DHCPPacket, &'static str>{
+    fn handle_dhcprequest(&self, request_packet: &DHCPPacket) ->  Result<DHCPPacket, &'static str>{
         let mut response_packet = DHCPPacket::new();
-        DHCPServer::set_common_fields(request_packet, &mut response_packet);
+        self.set_common_fields(request_packet, &mut response_packet);
 
         let mut vendor_data:Vec::<VendorData> = vec!();
 
@@ -163,10 +162,10 @@ impl DHCPServer{
         Ok(response_packet)
     }
 
-    fn handle_dhcpdiscover(request_packet: &DHCPPacket) ->  Result<DHCPPacket, &'static str>{
+    fn handle_dhcpdiscover(&self, request_packet: &DHCPPacket) ->  Result<DHCPPacket, &'static str>{
         let mut response_packet = DHCPPacket::new();
 
-        DHCPServer::set_common_fields(request_packet, &mut response_packet);
+        self.set_common_fields(request_packet, &mut response_packet);
 
         //TODO find a safe way to do this gracefully
         let _boot_file_name = "pxelinux/pxelinux.0".as_bytes();
@@ -191,7 +190,7 @@ impl DHCPServer{
         Ok(response_packet)
     }
 
-    pub fn generate_response(request_packet: &DHCPPacket) ->
+    pub fn generate_response(&self, request_packet: &DHCPPacket) ->
         Result<DHCPPacket, &'static str>
     {
         if request_packet.vendor_magic() != VENDOR_MAGIC{
@@ -215,8 +214,8 @@ impl DHCPServer{
                     None =>  return Err("unknown message type")
                 };
                 match message_type{
-                    DHCPMessageType::DHCPDISCOVER => DHCPServer::handle_dhcpdiscover(request_packet),
-                    DHCPMessageType::DHCPREQUEST => DHCPServer::handle_dhcprequest(request_packet),
+                    DHCPMessageType::DHCPDISCOVER => self.handle_dhcpdiscover(request_packet),
+                    DHCPMessageType::DHCPREQUEST => self.handle_dhcprequest(request_packet),
                     _ => return Err("cannot handle request for type")
                 }
             },
@@ -233,6 +232,10 @@ mod tests {
     use std::io::prelude::*;
     use super::*;
     use std::convert::TryFrom;
+
+    fn make_test_server() -> DHCPServer{
+         DHCPServer::new(false, false, "").unwrap()
+    }
 
     fn read_discovery_packet() ->  DHCPPacket{
         let cargo_manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -256,7 +259,8 @@ mod tests {
 
     #[test]
     fn test_handle_discover(){
-        let response_packet = DHCPServer::handle_dhcpdiscover(&read_discovery_packet()).unwrap();
+        let server = make_test_server();
+        let response_packet = server.handle_dhcpdiscover(&read_discovery_packet()).unwrap();
         assert_eq!(response_packet.opcode, DHCPMessageType::DHCPOFFER as u8);
         let vendor_data = response_packet.parse_vendor_data().unwrap();
         assert_eq!(vendor_data.len(), 3);
@@ -274,7 +278,9 @@ mod tests {
 
     #[test]
     fn test_handle_dhcprequest(){
-        let response_packet = DHCPServer::handle_dhcprequest(&read_discovery_packet()).unwrap();
+        let server = make_test_server();
+
+        let response_packet = server.handle_dhcprequest(&read_discovery_packet()).unwrap();
         assert_eq!(response_packet.opcode, DHCPOptCodes::RESPONSE as u8);
         let vendor_data = response_packet.parse_vendor_data().unwrap();
         assert_eq!(vendor_data.len(), 6);
