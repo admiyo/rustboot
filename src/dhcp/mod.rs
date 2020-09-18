@@ -10,6 +10,8 @@ use std::io::{Error, ErrorKind};
 use std::format;
 use std::time::SystemTime;
 use std::fs;
+use mac_address::MacAddress;
+
 mod packet;
 use packet::DHCPOptCodes;
 use packet::DHCPOptionCode;
@@ -22,6 +24,59 @@ use packet::VendorData;
 extern crate num;
 extern crate num_derive;
 
+pub struct MachineConfig{
+    pub mac_address: MacAddress
+}
+
+impl MachineConfig{
+
+    pub fn server_ip(&self) -> Ipv4Addr{
+        Ipv4Addr::new(192,168,144,1)
+    }
+
+    pub fn your_ip(&self) -> Ipv4Addr{
+        Ipv4Addr::new(192,168,144,100)
+    }
+
+    pub fn subnet_mask(&self) -> Ipv4Addr {
+        Ipv4Addr::new(255,255,255,0)
+    }
+
+    pub fn router(&self) -> Ipv4Addr {
+        Ipv4Addr::new(192,168,144,1)
+    }
+
+    pub fn lease_time(&self) -> u32 {
+         86400
+    }
+
+    pub fn dhcp_server(&self) -> Ipv4Addr {
+        Ipv4Addr::new(192,168,144,1)
+    }
+
+    pub fn boot_file_name(&self) -> String {
+        "pxelinux/pxelinux.0".to_string()
+    }
+    pub fn domain_search(&self) -> String {
+        "younglogic.net".to_string()
+    }
+
+
+    fn dns_servers(&self) -> Vec<u8> {
+        let _dns_servers : Vec<Ipv4Addr> = vec![
+            Ipv4Addr::new(75,75,75,75),Ipv4Addr::new(75,75,75,76),Ipv4Addr::new(8,8,8,8)]; 
+        let mut addr_buf = vec![];
+
+        for addr in _dns_servers {
+            for b in addr.octets().to_vec() {
+                addr_buf.push(b)
+            }
+        }
+        addr_buf
+    }
+
+}
+
 pub struct DHCPServer{
     logging: bool,
     local_ipv4: IpAddr,
@@ -31,6 +86,13 @@ pub struct DHCPServer{
 }
 
 impl DHCPServer{
+
+    pub fn machine_config(&self, mac: &MacAddress ) -> MachineConfig{
+        return MachineConfig{
+            mac_address: *mac
+        }
+    }
+
     pub fn new(logging: bool, capture: bool, capture_dir: &str) -> Result <DHCPServer, Error>  {
         let local_ip4 = IpAddr::from_str("0.0.0.0").unwrap();
         return Ok(DHCPServer{
@@ -118,9 +180,9 @@ impl DHCPServer{
         response_packet._hw_addr_len =  request_packet._hw_addr_len;
         response_packet._client_mac =  request_packet._client_mac;
         response_packet._txn_id =  request_packet._txn_id;
-        //TODO mover this logic into Packet
-        response_packet._server_ip =  Ipv4Addr::new(192,168,144,1).octets();
-        response_packet.your_ip =  Ipv4Addr::new(192,168,144,100).octets();
+        let config = self.machine_config(&request_packet.client_mac());
+        response_packet._server_ip =  config.server_ip().octets();
+        response_packet.your_ip =  config.your_ip().octets();
 
     }
 
@@ -128,27 +190,28 @@ impl DHCPServer{
         let mut response_packet = DHCPPacket::new();
         self.set_common_fields(request_packet, &mut response_packet);
 
+        let config = self.machine_config(&request_packet.client_mac());
+
+
         let mut vendor_data:Vec::<VendorData> = vec!();
 
         vendor_data.push(VendorData::new(DHCPOptionCode::DHCPMessageType,
              &vec![DHCPMessageType::DHCPACK as u8])?);
 
         vendor_data.push(VendorData::new(DHCPOptionCode::SubnetMask,
-            &vec![255,255,255,0])?);
+            &config.subnet_mask().octets().to_vec())?);
 
         vendor_data.push(VendorData::new(DHCPOptionCode::Router,
-            &vec![192,168,123,1])?);
+            &config.router().octets().to_vec())?);
 
-        let lease_time: u32 = 86400;
-        let lease_type_bytes: Vec<u8> = u32::to_be_bytes(lease_time).to_vec();
         vendor_data.push(VendorData::new(DHCPOptionCode::IPAddressLeaseTime,
-            &lease_type_bytes)?);
-    
+            &u32::to_be_bytes(config.lease_time()).to_vec())?);
+
         vendor_data.push(VendorData::new(DHCPOptionCode::DHCPServer,
-            &vec![192,168,123,1])?);
+            &config.dhcp_server().octets().to_vec())?);
 
         vendor_data.push(VendorData::new(DHCPOptionCode::DNSServers,
-            &vec![75,75,75,75,75,75,75,76,8,8,8,8])?);
+            &config.dns_servers())?);
         vendor_data.push(VendorData::END);
 
 
@@ -165,19 +228,19 @@ impl DHCPServer{
 
         self.set_common_fields(request_packet, &mut response_packet);
 
-        //TODO find a safe way to do this gracefully
-        let _boot_file_name = "pxelinux/pxelinux.0".as_bytes();
+        let config = self.machine_config(&request_packet.client_mac());
+
+        // if the string is too long for the field, this will panic.
+        let _boot_file_name = config.boot_file_name();
         for i in 0.._boot_file_name.len() {
-            response_packet._boot_file_name[i] =  _boot_file_name[i]
+            response_packet._boot_file_name[i] =  _boot_file_name.as_bytes()[i]
         }
         let mut vendor_data:Vec::<VendorData> = vec!();
 
         vendor_data.push(VendorData::new(DHCPOptionCode::DHCPMessageType,
              &vec![DHCPMessageType::DHCPOFFER as u8])?);
         vendor_data.push(VendorData::new(DHCPOptionCode::DomainSearch,
-            &"younglogic.net".as_bytes().to_vec())?);
-        vendor_data.push(VendorData::new(DHCPOptionCode::PXE128,
-                &"".as_bytes().to_vec())?);
+            &config.domain_search().as_bytes().to_vec())?);
         vendor_data.push(VendorData::END);
 
         let mut offset = 0;
@@ -261,7 +324,7 @@ mod tests {
         let response_packet = server.handle_dhcpdiscover(&read_discovery_packet()).unwrap();
         assert_eq!(response_packet.opcode, DHCPMessageType::DHCPOFFER as u8);
         let vendor_data = response_packet.parse_vendor_data().unwrap();
-        assert_eq!(vendor_data.len(), 3);
+        assert_eq!(vendor_data.len(), 2);
         match vendor_data.get(&DHCPOptionCode::DHCPMessageType){
             Some(option) =>  {
                 assert_eq!(DHCPOptionCode::DHCPMessageType as u8, option.code);
